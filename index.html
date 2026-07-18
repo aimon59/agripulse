@@ -621,7 +621,7 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
   <div class="hero">
     <div>
       <div class="eyebrow"><span class="dot-live"></span> Live · Updated moments ago</div>
-      <h1>Good morning, Aimon.<br>Your farm, <em>watched over.</em></h1>
+      <h1>Good morning, Rahim.<br>Your farm, <em>watched over.</em></h1>
       <p class="sub">Real-time weather, disease alerts and daily tasks for your poultry and cattle farm — read by AI, so you don't have to check ten different apps.</p>
       <div class="weather-chip">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--sky-deep)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A5 5 0 0 0 6.5 19h11z"/></svg>
@@ -1055,7 +1055,15 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
     <span class="tag">Saved plans · start one to track it day by day</span>
   </div>
 
-  <div id="myPlansListView">
+  <div id="myPlansLoginPrompt">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">Log in to see your plans</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.6);line-height:1.5;">Your saved and active plans are tied to your account now, so they follow you across devices.</p>
+      <button class="primary-btn" onclick="showPage('profile')">Go to Profile to log in</button>
+    </div>
+  </div>
+
+  <div id="myPlansListView" style="display:none;">
     <div id="myPlansGridWrap"></div>
   </div>
 
@@ -1193,6 +1201,11 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
     <span class="tag">Everything AgriPulse can do</span>
   </div>
   <div class="prog-grid">
+    <div class="card prog-card" onclick="showPage('profile')">
+      <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg></div>
+      <h3>Profile</h3>
+      <p>Log in, edit your name, unique ID and phone, and see your plans and inbox.</p>
+    </div>
     <div class="card prog-card" onclick="showPage('scan')">
       <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/></svg></div>
       <h3>AI Health Scanner</h3>
@@ -1229,20 +1242,27 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
   </div>
 </section>
 
-<!-- ================= MARKETPLACE ================= -->
-<section class="page" id="page-marketplace">
+<!-- ================= PROFILE ================= -->
+<section class="page" id="page-profile">
   <div class="section-title" style="margin-top:0;">
-    <h2>Animal Marketplace</h2>
-    <span class="tag">Buy &amp; sell with other farmers</span>
+    <h2>Profile</h2>
+    <span class="tag">Your account, plans &amp; messages in one place</span>
   </div>
 
-  <!-- Auth gate -->
-  <div id="mktAuthGate">
+  <!-- Auth gate: login / sign up -->
+  <div id="profAuthGate">
     <div class="card auth-card">
       <div class="auth-toggle">
         <button class="on" data-mode="login" onclick="setAuthMode('login')">Log in</button>
         <button data-mode="signup" onclick="setAuthMode('signup')">Sign up</button>
       </div>
+
+      <button class="primary-btn" style="background:linear-gradient(135deg,#4285F4,#1a73e8);margin-bottom:16px;" onclick="signInWithGoogle()">
+        <svg width="18" height="18" viewBox="0 0 24 24" style="margin-right:4px;"><path fill="#fff" d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81z"/></svg>
+        Continue with Google
+      </button>
+      <div style="text-align:center;font-size:11.5px;color:rgba(18,32,26,.4);margin:-8px 0 16px;">— or use email —</div>
+
       <div class="auth-form">
         <div class="field">
           <label>Email</label>
@@ -1258,25 +1278,117 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
     </div>
   </div>
 
-  <!-- One-time profile setup -->
-  <div id="mktProfileSetup" style="display:none;">
+  <!-- Email verification gate -->
+  <div id="profVerifyGate" style="display:none;">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">Verify your email</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.65);line-height:1.6;">We sent a verification link to <strong id="verifyEmailText">your email</strong>. Open it, then come back and tap Continue.</p>
+      <button class="primary-btn" onclick="checkVerificationAndProceed()">I've verified — continue</button>
+      <button class="ghost-btn" style="margin-top:10px;width:100%;padding:12px;" onclick="resendVerification()">Resend email</button>
+      <button class="ghost-btn" style="margin-top:10px;width:100%;padding:12px;color:var(--barn);" onclick="logOut()">Log out</button>
+      <div class="auth-error" id="verifyError"></div>
+    </div>
+  </div>
+
+  <!-- One-time / editable profile details -->
+  <div id="profDetailsForm" style="display:none;">
     <div class="card auth-card">
-      <h3 style="margin-top:0;font-size:16px;">Tell us a little about you</h3>
+      <h3 style="margin-top:0;font-size:16px;" id="profDetailsHeading">Tell us a little about you</h3>
       <p style="font-size:12.5px;color:rgba(18,32,26,.55);margin-top:-6px;">Shown to other farmers when you post a listing or message someone.</p>
       <div class="field">
         <label>Your name</label>
         <input type="text" id="profileName" placeholder="e.g. Rahim Uddin">
       </div>
       <div class="field">
-        <label>Phone (optional)</label>
+        <label>Unique user ID</label>
+        <input type="text" id="profileUsername" placeholder="e.g. rahim_farms (letters, numbers, _)">
+      </div>
+      <div class="field">
+        <label>Phone number</label>
         <input type="text" id="profilePhone" placeholder="e.g. 01XXXXXXXXX">
       </div>
       <div class="field">
         <label>Location</label>
         <input type="text" id="profileLocation" placeholder="e.g. Bogura, Bangladesh">
       </div>
-      <button class="primary-btn" onclick="submitProfile()">Continue</button>
+      <button class="primary-btn" onclick="submitProfile()">Save</button>
       <div class="auth-error" id="profileError"></div>
+    </div>
+  </div>
+
+  <!-- Signed-in account view -->
+  <div id="profMain" style="display:none;">
+    <div class="card account-bar" style="margin-bottom:24px;">
+      <div class="avatar" id="profAvatar" style="width:52px;height:52px;font-size:18px;">?</div>
+      <div>
+        <div class="who" id="profName" style="font-size:16px;">—</div>
+        <div class="where" id="profHandle">—</div>
+        <div class="where" id="profContact">—</div>
+      </div>
+      <button onclick="logOut()">Log out</button>
+    </div>
+
+    <div class="section-title" style="margin-top:0;">
+      <h2 style="font-size:18px;">Your activity</h2>
+    </div>
+    <div class="prog-grid">
+      <div class="card prog-card" onclick="showPage('myplans')">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3M9 11h6M9 15h4"/></svg></div>
+        <h3>My Plans</h3>
+        <p>See your saved and active farm plans, day by day.</p>
+      </div>
+      <div class="card prog-card" onclick="showPage('marketplace'); showMktView('inbox');">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <h3>Inbox</h3>
+        <p>Your marketplace conversations with buyers and sellers.</p>
+      </div>
+      <div class="card prog-card" onclick="showPage('marketplace'); showMktView('mylistings');">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9h18v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9z"/><path d="M3 9l1.5-5h15L21 9"/></svg></div>
+        <h3>My Listings</h3>
+        <p>Animals you're selling or want to buy.</p>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <h2 style="font-size:18px;">Edit profile</h2>
+    </div>
+    <div class="card auth-card" style="margin:0;">
+      <div class="field">
+        <label>Your name</label>
+        <input type="text" id="editName" placeholder="e.g. Rahim Uddin">
+      </div>
+      <div class="field">
+        <label>Unique user ID</label>
+        <input type="text" id="editUsername" placeholder="e.g. rahim_farms">
+      </div>
+      <div class="field">
+        <label>Phone number</label>
+        <input type="text" id="editPhone" placeholder="e.g. 01XXXXXXXXX">
+      </div>
+      <div class="field">
+        <label>Location</label>
+        <input type="text" id="editLocation" placeholder="e.g. Bogura, Bangladesh">
+      </div>
+      <button class="primary-btn" onclick="saveProfileEdits()">Save changes</button>
+      <div class="auth-error" id="editProfileError"></div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ================= MARKETPLACE ================= -->
+<section class="page" id="page-marketplace">
+  <div class="section-title" style="margin-top:0;">
+    <h2>Animal Marketplace</h2>
+    <span class="tag">Buy &amp; sell with other farmers</span>
+  </div>
+
+  <!-- Shown when not logged in / verified / profile incomplete -->
+  <div id="mktLoginPrompt">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">Log in to use the Marketplace</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.6);line-height:1.5;">You need an account to browse, post, or message other farmers. It only takes a minute.</p>
+      <button class="primary-btn" onclick="showPage('profile')">Go to Profile to log in</button>
     </div>
   </div>
 
@@ -1427,8 +1539,6 @@ footer{text-align:center;padding:40px 0 10px;font-size:12px;color:rgba(18,32,26,
 <script>
 
 
-
-
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyDAWdW_M10sMElFdkWabPeJoHJC-FX7ji0",
@@ -1442,8 +1552,6 @@ const firebaseConfig = {
 
 
 
-
-
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -1454,11 +1562,14 @@ function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  document.querySelector('.nav-btn[data-page="'+name+'"]').classList.add('active');
+  const navBtn = document.querySelector('.nav-btn[data-page="'+name+'"]');
+  if(navBtn) navBtn.classList.add('active');
   window.scrollTo({top:0,behavior:'smooth'});
   if(name==='myplans'){
     backToMyPlansList();
-    renderMyPlansPage();
+  }
+  if(name==='profile' || name==='marketplace' || name==='myplans'){
+    renderAccountState();
   }
 }
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -2385,78 +2496,35 @@ function calculatePlan(){
   goStep(5);
 }
 
-/* ---- save / my plans / compare ---- */
+/* ---- save / my plans / compare (Firestore, tied to account) ---- */
 function saveCurrentPlan(){
   if(!window.currentReport){ return; }
+  if(!currentProfile){ promptLoginRequired('save a plan'); return; }
   const id = 'plan_' + Date.now();
-  const payload = Object.assign({}, window.currentReport, {id, savedAt: new Date().toISOString(), label: `${window.currentReport.breedName} · ${window.currentReport.qty.toLocaleString()} ${window.currentReport.unitWord}s`});
+  const payload = Object.assign({}, window.currentReport, {
+    id, ownerUid: currentUser.uid, savedAtLocal: new Date().toISOString(),
+    savedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    label: `${window.currentReport.breedName} · ${window.currentReport.qty.toLocaleString()} ${window.currentReport.unitWord}s`,
+    active: null
+  });
   const finish = ()=>{
     const btn = document.getElementById('saveBtn');
     if(btn){ const orig = btn.textContent; btn.textContent = 'Plan saved'; setTimeout(()=>{ btn.textContent = orig; }, 1600); }
   };
-  if(window.storage){
-    window.storage.set(id, JSON.stringify(payload), false).then(finish).catch(()=>{ fallbackPlans.push(payload); finish(); });
-  } else {
-    fallbackPlans.push(payload);
-    finish();
-  }
+  db.collection('plans').doc(id).set(payload).then(finish).catch(err=>{
+    alert('Could not save this plan: ' + err.message);
+  });
 }
 
 function getAllSavedPlans(){
-  const fromFallback = fallbackPlans.slice();
-  if(!window.storage){
-    return Promise.resolve(fromFallback.sort((a,b)=> new Date(b.savedAt)-new Date(a.savedAt)));
-  }
-  return window.storage.list('plan_', false).then(list=>{
-    const keys = (list && list.keys) ? list.keys : [];
-    return Promise.all(keys.map(k=> window.storage.get(k, false).then(res=> res ? JSON.parse(res.value) : null).catch(()=>null)));
-  }).then(results=>{
-    const plans = results.filter(Boolean).concat(fromFallback);
-    plans.sort((a,b)=> new Date(b.savedAt)-new Date(a.savedAt));
-    return plans;
-  }).catch(()=> fromFallback);
+  if(!currentUser) return Promise.resolve([]);
+  return db.collection('plans').where('ownerUid','==',currentUser.uid).orderBy('savedAtLocal','desc').get()
+    .then(snap=> snap.docs.map(d=>({id:d.id, ...d.data()})))
+    .catch(err=>{ console.warn('getAllSavedPlans failed:', err); return []; });
 }
 
 function deleteSavedPlan(id){
-  const go = ()=>{
-    fallbackPlans = fallbackPlans.filter(p=>p.id!==id);
-    renderMyPlansGrid();
-  };
-  if(window.storage){
-    window.storage.delete(id, false).then(go).catch(go);
-  } else { go(); }
-}
-
-function renderMyPlansGrid(){
-  const wrap = document.getElementById('plansGridWrap');
-  wrap.innerHTML = '<div class="empty-state">Loading saved plans…</div>';
-  getAllSavedPlans().then(plans=>{
-    if(!plans.length){
-      wrap.innerHTML = `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M12 8v8"/></svg><div>No saved plans yet. Build one under "New plan" and tap "Save this plan".</div></div>`;
-      return;
-    }
-    wrap.innerHTML = `<div class="plans-grid">${plans.map(p=>`
-      <div class="card plan-card" onclick="openSavedPlan('${p.id}')">
-        <div class="icon-wrap">${groupIconSVG(p.group)}</div>
-        <h4>${p.breedName} · ${p.groupName}</h4>
-        <div class="p-meta">${p.qty.toLocaleString()} ${p.unitWord}s · ${p.cycleLabel} cycle</div>
-        <div class="p-profit">৳ ${Math.round(p.profit).toLocaleString()}</div>
-        <div class="p-date">Saved ${new Date(p.savedAt).toLocaleDateString()}</div>
-        <button class="delete-plan" onclick="event.stopPropagation(); deleteSavedPlan('${p.id}')">Delete</button>
-      </div>
-    `).join('')}</div>`;
-  });
-}
-
-function openSavedPlan(id){
-  getAllSavedPlans().then(plans=>{
-    const p = plans.find(x=>x.id===id);
-    if(!p) return;
-    window.currentReport = p;
-    renderReportFromData(p);
-    showPlannerView('new');
-    goStep(5);
-  });
+  return db.collection('plans').doc(id).delete();
 }
 
 function populateCompareSelects(){
@@ -2504,28 +2572,24 @@ selectGroup('poultry');
 setAreaUnit('sqft');
 
 /* ================= MY PLANS: ACTIVE EXECUTION TRACKING ================= */
-let fallbackActivePlans = [];
 let notifiedKeys = new Set();
 
 function saveActivePlan(record){
-  if(window.storage){
-    return window.storage.set('active_'+record.id, JSON.stringify(record), false).catch(()=>{ fallbackActivePlans.push(record); });
-  }
-  fallbackActivePlans.push(record);
-  return Promise.resolve();
+  return db.collection('plans').doc(record.id).update({
+    active: {startedAt: record.startedAt, schedule: record.schedule}
+  });
 }
 function getAllActivePlans(){
-  const fromFallback = fallbackActivePlans.slice();
-  if(!window.storage) return Promise.resolve(fromFallback);
-  return window.storage.list('active_', false).then(list=>{
-    const keys = (list && list.keys) ? list.keys : [];
-    return Promise.all(keys.map(k=> window.storage.get(k, false).then(r=> r?JSON.parse(r.value):null).catch(()=>null)));
-  }).then(results=> results.filter(Boolean).concat(fromFallback)).catch(()=> fromFallback);
+  return getAllSavedPlans().then(plans=> plans
+    .filter(p=>p.active)
+    .map(p=> Object.assign({}, p.active, {
+      id:p.id, group:p.group, groupName:p.groupName, breedName:p.breedName,
+      qty:p.qty, unitWord:p.unitWord, cycleDays:p.cycleDays, cycleLabel:p.cycleLabel
+    }))
+  );
 }
 function deleteActivePlanRecord(id){
-  fallbackActivePlans = fallbackActivePlans.filter(p=>p.id!==id);
-  if(window.storage) return window.storage.delete('active_'+id, false).catch(()=>{});
-  return Promise.resolve();
+  return db.collection('plans').doc(id).update({active: firebase.firestore.FieldValue.delete()}).catch(()=>{});
 }
 
 /* generic confirm modal — returns a Promise<boolean> */
@@ -2787,11 +2851,10 @@ function checkActivePlanNotifications(){
 }
 setInterval(checkActivePlanNotifications, 60000);
 
-/* ================= MARKETPLACE (Firebase Auth + Firestore) ================= */
+/* ================= ACCOUNT SYSTEM (Firebase Auth + Firestore) ================= */
 let currentUser = null;
 let currentProfile = null;
 let unsubListings = null;
-let unsubMyListingsUnused = null;
 let unsubConvs = null;
 let unsubMessages = null;
 let activeConvId = null;
@@ -2800,47 +2863,82 @@ let cachedConvs = [];
 let authMode = 'login';
 let postType = 'sell';
 
+function isGoogleUser(user){
+  return !!(user && user.providerData && user.providerData.some(p=>p.providerId==='google.com'));
+}
+
 auth.onAuthStateChanged(async (user)=>{
   currentUser = user;
   if(!user){
     currentProfile = null;
     detachAllListeners();
-    showAuthGate();
+    renderAccountState();
+    return;
+  }
+  const verified = user.emailVerified || isGoogleUser(user);
+  if(!verified){
+    renderAccountState();
     return;
   }
   try{
     const doc = await db.collection('users').doc(user.uid).get();
-    if(doc.exists){
-      currentProfile = doc.data();
-      showMktMain();
-    } else {
-      showProfileSetup();
-    }
+    currentProfile = doc.exists ? doc.data() : null;
   } catch(e){
     console.warn('Profile check failed:', e);
-    showAuthGate();
+    currentProfile = null;
   }
+  renderAccountState();
 });
 
-function showAuthGate(){
-  document.getElementById('mktAuthGate').style.display='block';
-  document.getElementById('mktProfileSetup').style.display='none';
-  document.getElementById('mktMain').style.display='none';
-}
-function showProfileSetup(){
-  document.getElementById('mktAuthGate').style.display='none';
-  document.getElementById('mktProfileSetup').style.display='block';
-  document.getElementById('mktMain').style.display='none';
-}
-function showMktMain(){
-  document.getElementById('mktAuthGate').style.display='none';
-  document.getElementById('mktProfileSetup').style.display='none';
-  document.getElementById('mktMain').style.display='block';
-  document.getElementById('acctAvatar').textContent = (currentProfile.name||'?').charAt(0).toUpperCase();
-  document.getElementById('acctName').textContent = currentProfile.name || 'Farmer';
-  document.getElementById('acctLocation').textContent = currentProfile.location || '';
-  attachListingsListener();
-  attachConversationsListener();
+/* single source of truth for which screen shows, used by Profile, Marketplace and My Plans */
+function renderAccountState(){
+  const loggedIn = !!currentUser;
+  const verified = loggedIn && (currentUser.emailVerified || isGoogleUser(currentUser));
+  const hasProfile = verified && !!currentProfile;
+
+  const gate = document.getElementById('profAuthGate');
+  const verify = document.getElementById('profVerifyGate');
+  const details = document.getElementById('profDetailsForm');
+  const main = document.getElementById('profMain');
+  if(gate) gate.style.display = (!loggedIn) ? 'block' : 'none';
+  if(verify) verify.style.display = (loggedIn && !verified) ? 'block' : 'none';
+  if(details) details.style.display = (verified && !hasProfile) ? 'block' : 'none';
+  if(main) main.style.display = hasProfile ? 'block' : 'none';
+
+  if(loggedIn && !verified){
+    document.getElementById('verifyEmailText').textContent = currentUser.email || 'your email';
+  }
+  if(hasProfile){
+    document.getElementById('profDetailsHeading').textContent = 'Tell us a little about you';
+    document.getElementById('profAvatar').textContent = (currentProfile.name||'?').charAt(0).toUpperCase();
+    document.getElementById('profName').textContent = currentProfile.name || 'Farmer';
+    document.getElementById('profHandle').textContent = currentProfile.username ? '@'+currentProfile.username : '';
+    document.getElementById('profContact').textContent = [currentProfile.phone, currentProfile.location].filter(Boolean).join(' · ');
+    document.getElementById('editName').value = currentProfile.name || '';
+    document.getElementById('editUsername').value = currentProfile.username || '';
+    document.getElementById('editPhone').value = currentProfile.phone || '';
+    document.getElementById('editLocation').value = currentProfile.location || '';
+  }
+
+  const mktPrompt = document.getElementById('mktLoginPrompt');
+  const mktMain = document.getElementById('mktMain');
+  if(mktPrompt) mktPrompt.style.display = hasProfile ? 'none' : 'block';
+  if(mktMain) mktMain.style.display = hasProfile ? 'block' : 'none';
+  if(hasProfile){
+    document.getElementById('acctAvatar').textContent = (currentProfile.name||'?').charAt(0).toUpperCase();
+    document.getElementById('acctName').textContent = currentProfile.name || 'Farmer';
+    document.getElementById('acctLocation').textContent = currentProfile.location || '';
+    attachListingsListener();
+    attachConversationsListener();
+  }
+
+  const plansPrompt = document.getElementById('myPlansLoginPrompt');
+  const plansMain = document.getElementById('myPlansListView');
+  if(plansPrompt){
+    plansPrompt.style.display = hasProfile ? 'none' : 'block';
+    if(plansMain) plansMain.style.display = hasProfile ? 'block' : 'none';
+    if(hasProfile) renderMyPlansPage();
+  }
 }
 
 function setAuthMode(mode){
@@ -2862,10 +2960,55 @@ function submitAuth(){
   }
   const action = authMode==='login'
     ? auth.signInWithEmailAndPassword(email, password)
-    : auth.createUserWithEmailAndPassword(email, password);
+    : auth.createUserWithEmailAndPassword(email, password).then(cred=> cred.user.sendEmailVerification());
   action.catch(err=>{
     errEl.textContent = err.message;
     errEl.style.display='block';
+  });
+}
+
+function signInWithGoogle(){
+  const errEl = document.getElementById('authError');
+  errEl.style.display='none';
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err=>{
+    if(err.code==='auth/popup-blocked' || err.code==='auth/cancelled-popup-request' || err.code==='auth/operation-not-supported-in-this-environment'){
+      auth.signInWithRedirect(provider).catch(()=>{});
+    } else {
+      errEl.textContent = err.message;
+      errEl.style.display='block';
+    }
+  });
+}
+auth.getRedirectResult().catch(err=>console.warn('Google redirect sign-in error:', err));
+
+async function checkVerificationAndProceed(){
+  const errEl = document.getElementById('verifyError');
+  errEl.style.display='none';
+  try{
+    await auth.currentUser.reload();
+    if(auth.currentUser.emailVerified){
+      currentUser = auth.currentUser;
+      renderAccountState();
+    } else {
+      errEl.textContent = "Still not verified — check your inbox (and spam folder), then try again.";
+      errEl.style.display='block';
+    }
+  } catch(e){
+    errEl.textContent = e.message;
+    errEl.style.display='block';
+  }
+}
+function resendVerification(){
+  const errEl = document.getElementById('verifyError');
+  auth.currentUser.sendEmailVerification().then(()=>{
+    errEl.style.display='block';
+    errEl.style.background='rgba(63,163,77,0.14)';
+    errEl.style.color='var(--canopy-2)';
+    errEl.textContent = 'Verification email sent — check your inbox.';
+  }).catch(err=>{
+    errEl.style.display='block';
+    errEl.textContent = err.message;
   });
 }
 
@@ -2874,25 +3017,96 @@ function logOut(){
   auth.signOut();
 }
 
+async function checkUsernameAvailable(username, uid){
+  const doc = await db.collection('usernames').doc(username).get();
+  return !doc.exists || doc.data().uid===uid;
+}
+
 function submitProfile(){
-  const name = document.getElementById('profileName').value.trim();
-  const phone = document.getElementById('profilePhone').value.trim();
-  const location = document.getElementById('profileLocation').value.trim();
   const errEl = document.getElementById('profileError');
   errEl.style.display='none';
+  const name = document.getElementById('profileName').value.trim();
+  const username = document.getElementById('profileUsername').value.trim().toLowerCase();
+  const phone = document.getElementById('profilePhone').value.trim();
+  const location = document.getElementById('profileLocation').value.trim();
+
   if(!name || !location){
     errEl.textContent = 'Please add at least your name and location.';
     errEl.style.display='block';
     return;
   }
-  const profile = {name, phone, location, email: currentUser.email, createdAt: firebase.firestore.FieldValue.serverTimestamp()};
-  db.collection('users').doc(currentUser.uid).set(profile).then(()=>{
-    currentProfile = profile;
-    showMktMain();
+  if(!/^[a-z0-9_]{3,20}$/.test(username)){
+    errEl.textContent = 'Unique user ID must be 3-20 characters: letters, numbers or underscore only.';
+    errEl.style.display='block';
+    return;
+  }
+
+  checkUsernameAvailable(username, currentUser.uid).then(available=>{
+    if(!available){
+      errEl.textContent = 'That user ID is already taken — try another.';
+      errEl.style.display='block';
+      return;
+    }
+    const profile = {name, username, phone, location, email: currentUser.email, createdAt: firebase.firestore.FieldValue.serverTimestamp()};
+    return db.collection('usernames').doc(username).set({uid: currentUser.uid})
+      .then(()=> db.collection('users').doc(currentUser.uid).set(profile))
+      .then(()=>{
+        currentProfile = profile;
+        renderAccountState();
+      });
   }).catch(err=>{
     errEl.textContent = err.message;
     errEl.style.display='block';
   });
+}
+
+function saveProfileEdits(){
+  const errEl = document.getElementById('editProfileError');
+  errEl.style.display='none';
+  const name = document.getElementById('editName').value.trim();
+  const username = document.getElementById('editUsername').value.trim().toLowerCase();
+  const phone = document.getElementById('editPhone').value.trim();
+  const location = document.getElementById('editLocation').value.trim();
+
+  if(!name || !location){
+    errEl.textContent = 'Please keep at least your name and location filled in.';
+    errEl.style.display='block';
+    return;
+  }
+  if(!/^[a-z0-9_]{3,20}$/.test(username)){
+    errEl.textContent = 'Unique user ID must be 3-20 characters: letters, numbers or underscore only.';
+    errEl.style.display='block';
+    return;
+  }
+
+  checkUsernameAvailable(username, currentUser.uid).then(available=>{
+    if(!available){
+      errEl.textContent = 'That user ID is already taken — try another.';
+      errEl.style.display='block';
+      return;
+    }
+    const updates = {name, username, phone, location};
+    const tasks = [db.collection('users').doc(currentUser.uid).set(updates, {merge:true})];
+    if(username !== currentProfile.username){
+      tasks.push(db.collection('usernames').doc(username).set({uid: currentUser.uid}));
+    }
+    return Promise.all(tasks).then(()=>{
+      currentProfile = Object.assign({}, currentProfile, updates);
+      renderAccountState();
+      errEl.style.display='block';
+      errEl.style.background='rgba(63,163,77,0.14)';
+      errEl.style.color='var(--canopy-2)';
+      errEl.textContent = 'Profile updated.';
+    });
+  }).catch(err=>{
+    errEl.textContent = err.message;
+    errEl.style.display='block';
+  });
+}
+
+function promptLoginRequired(action){
+  alert(`Please log in first to ${action}. Redirecting you to Profile…`);
+  showPage('profile');
 }
 
 /* ---- tabs ---- */
@@ -3094,24 +3308,43 @@ function convIdFor(listingId, uidA, uidB){
 }
 
 async function startConversation(listingId){
-  const listing = cachedListings.find(l=>l.id===listingId);
-  if(!listing) return;
-  const otherUid = listing.authorUid;
-  if(otherUid===currentUser.uid) return;
-  const convId = convIdFor(listingId, currentUser.uid, otherUid);
-  const convRef = db.collection('conversations').doc(convId);
-  const doc = await convRef.get();
-  if(!doc.exists){
-    await convRef.set({
-      listingId, listingTitle: `${listing.breed||listing.group} (${listing.type==='sell'?'for sale':'wanted'})`,
-      participants: [currentUser.uid, otherUid],
-      participantNames: {[currentUser.uid]: currentProfile.name, [otherUid]: listing.authorName},
-      lastMessage: '', lastSenderUid: null,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+  let listing = cachedListings.find(l=>l.id===listingId);
+  if(!listing){
+    try{
+      const listingDoc = await db.collection('listings').doc(listingId).get();
+      if(listingDoc.exists) listing = {id: listingDoc.id, ...listingDoc.data()};
+    }catch(e){
+      console.warn('Could not fetch listing directly:', e);
+    }
   }
-  showMktView('inbox');
-  openConversation(convId);
+  if(!listing){
+    alert('Could not open this listing — it may have been removed. Try refreshing Browse.');
+    return;
+  }
+  const otherUid = listing.authorUid;
+  if(otherUid===currentUser.uid){
+    alert("This is your own listing, so there's no one to message.");
+    return;
+  }
+  try{
+    const convId = convIdFor(listingId, currentUser.uid, otherUid);
+    const convRef = db.collection('conversations').doc(convId);
+    const doc = await convRef.get();
+    if(!doc.exists){
+      await convRef.set({
+        listingId, listingTitle: `${listing.breed||listing.group} (${listing.type==='sell'?'for sale':'wanted'})`,
+        participants: [currentUser.uid, otherUid],
+        participantNames: {[currentUser.uid]: currentProfile.name, [otherUid]: listing.authorName},
+        lastMessage: '', lastSenderUid: null,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    showMktView('inbox');
+    openConversation(convId);
+  } catch(err){
+    console.warn('startConversation failed:', err);
+    alert('Could not start the conversation: ' + err.message);
+  }
 }
 
 function openConversation(convId){
