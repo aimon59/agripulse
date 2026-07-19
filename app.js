@@ -10,12 +10,10 @@ const firebaseConfig = {
 };
 
 
-
-
-
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+const storage = firebase.storage();
 
 
 
@@ -30,7 +28,7 @@ function showPage(name){
   if(name==='myplans'){
     backToMyPlansList();
   }
-  if(name==='profile' || name==='marketplace' || name==='myplans'){
+  if(name==='profile' || name==='marketplace' || name==='myplans' || name==='medical'){
     renderAccountState();
   }
 }
@@ -1401,6 +1399,14 @@ function renderAccountState(){
     if(plansMain) plansMain.style.display = hasProfile ? 'block' : 'none';
     if(hasProfile) renderMyPlansPage();
   }
+
+  const medPrompt = document.getElementById('medLoginPrompt');
+  const medMain = document.getElementById('medMain');
+  if(medPrompt){
+    medPrompt.style.display = hasProfile ? 'none' : 'block';
+    if(medMain) medMain.style.display = hasProfile ? 'block' : 'none';
+    if(hasProfile) initMedicalPage();
+  }
 }
 
 function setAuthMode(mode){
@@ -1860,6 +1866,16 @@ function detachAllListeners(){
   if(unsubListings){ unsubListings(); unsubListings=null; }
   if(unsubConvs){ unsubConvs(); unsubConvs=null; }
   if(unsubMessages){ unsubMessages(); unsubMessages=null; }
+  if(unsubAnimals){ unsubAnimals(); unsubAnimals=null; }
+  if(unsubDoctors){ unsubDoctors(); unsubDoctors=null; }
+  if(unsubFarmerAppts){ unsubFarmerAppts(); unsubFarmerAppts=null; }
+  if(unsubRx){ unsubRx(); unsubRx=null; }
+  if(unsubDocRequests){ unsubDocRequests(); unsubDocRequests=null; }
+  if(unsubDocAppts){ unsubDocAppts(); unsubDocAppts=null; }
+  if(unsubRoomAppt){ unsubRoomAppt(); unsubRoomAppt=null; }
+  if(unsubRoomMessages){ unsubRoomMessages(); unsubRoomMessages=null; }
+  if(unsubCallWatch){ unsubCallWatch(); unsubCallWatch=null; }
+  medListenersAttached = false;
 }
 
 /* ================= THREE.JS HERO ================= */
@@ -1955,3 +1971,902 @@ function detachAllListeners(){
     renderer.setSize(w,h);
   });
 })();
+
+/* ================= MEDICAL: real doctor consultations ================= */
+
+/* ---- state ---- */
+let medListenersAttached = false;
+let cachedAnimals = [];
+let cachedDoctors = [];
+let cachedFarmerAppts = [];
+let cachedRx = [];
+let cachedDocRequests = [];
+let cachedDocAppts = [];
+let unsubAnimals=null, unsubDoctors=null, unsubFarmerAppts=null, unsubRx=null, unsubDocRequests=null, unsubDocAppts=null;
+let unsubRoomAppt=null, unsubRoomMessages=null, unsubCallWatch=null;
+let bookingDoctor = null;
+let bookMode='text', bookWhen='now';
+let currentRoomApptId = null;
+let currentRoomAppt = null;
+let rxMedCount = 0;
+
+/* recording */
+let mediaRecorder=null, recordedChunks=[], recordStream=null, recordTimerHandle=null, recordSeconds=0, recordKind='video';
+
+/* webrtc */
+let pc=null, localStream=null, callSessionUnsub=null, callCandUnsub=null, callIsCaller=false, callMode='video';
+const RTC_CONFIG = {iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+
+/* ---- helpers ---- */
+function genQuickId(prefix){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s='';
+  for(let i=0;i<5;i++) s+=chars[Math.floor(Math.random()*chars.length)];
+  return (prefix||'ANM')+'-'+s;
+}
+function fmtWhen(ts){
+  if(!ts) return 'As soon as possible';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+function statusLabel(status){
+  return {pending:'Pending', accepted:'Accepted', declined:'Declined', completed:'Completed'}[status] || status;
+}
+function statusSevClass(status){
+  return {pending:'sev-med', accepted:'sev-low', declined:'sev-high', completed:'sev-low'}[status] || 'sev-med';
+}
+
+/* ---- page init ---- */
+function initMedicalPage(){
+  document.getElementById('medAcctAvatar').textContent = (currentProfile.name||'?').charAt(0).toUpperCase();
+  document.getElementById('medAcctName').textContent = currentProfile.name || 'Farmer';
+  const isDoctor = !!currentProfile.doctorProfile;
+  document.getElementById('medAcctRole').textContent = isDoctor ? ('Doctor · '+(currentProfile.doctorProfile.specialty||'')) : 'Farmer account';
+  document.getElementById('medRoleSwitchBtn').style.display = isDoctor ? 'none' : 'inline-block';
+  if(document.getElementById('medRoom').style.display !== 'block'){
+    document.getElementById('medFarmerView').style.display = isDoctor ? 'none' : 'block';
+    document.getElementById('medDoctorView').style.display = isDoctor ? 'block' : 'none';
+  }
+
+  if(medListenersAttached) return;
+  medListenersAttached = true;
+  if(isDoctor){
+    document.getElementById('docEditSpecialty').value = currentProfile.doctorProfile.specialty||'';
+    document.getElementById('docEditBio').value = currentProfile.doctorProfile.bio||'';
+    document.getElementById('docEditFeeType').value = currentProfile.doctorProfile.feeType||'free';
+    document.getElementById('docEditFeeAmount').value = currentProfile.doctorProfile.fee||'';
+    document.getElementById('docEditFeeAmountWrap').style.display = (currentProfile.doctorProfile.feeType==='paid') ? 'block':'none';
+    setDoctorStatusButtons(currentProfile.doctorProfile.status||'offline');
+    attachDoctorRequestsListener();
+    attachDoctorApptsListener();
+  } else {
+    attachAnimalsListener();
+    attachDoctorsListener();
+    attachFarmerApptsListener();
+    attachRxListener();
+  }
+}
+
+/* ---- tabs ---- */
+function showMedFarmerView(view){
+  document.querySelectorAll('#medFarmerView .mkt-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#medFarmerView .mkt-tab[data-view="'+view+'"]').classList.add('active');
+  document.querySelectorAll('#medFarmerView .mkt-view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('medview-'+view).classList.add('active');
+}
+function showMedDoctorView(view){
+  document.querySelectorAll('#medDoctorView .mkt-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#medDoctorView .mkt-tab[data-view="'+view+'"]').classList.add('active');
+  document.querySelectorAll('#medDoctorView .mkt-view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('medview-'+view).classList.add('active');
+}
+
+/* ---- doctor registration ---- */
+function toggleDoctorRegisterPanel(){
+  const panel = document.getElementById('medDoctorRegisterPanel');
+  panel.style.display = panel.style.display==='none' ? 'block' : 'none';
+}
+
+function submitDoctorRegistration(){
+  const errEl = document.getElementById('docRegError');
+  errEl.style.display='none';
+  const specialty = document.getElementById('docSpecialty').value.trim();
+  const feeType = document.getElementById('docFeeType').value;
+  const fee = feeType==='paid' ? (parseFloat(document.getElementById('docFeeAmount').value)||0) : 0;
+  const bio = document.getElementById('docBio').value.trim();
+  if(!specialty){
+    errEl.textContent = 'Please enter your specialty.';
+    errEl.style.display='block';
+    return;
+  }
+  const doctorProfile = {specialty, feeType, fee, bio, status:'offline'};
+  db.collection('users').doc(currentUser.uid).set({
+    isDoctor:true, doctorProfile, doctorRegisteredAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, {merge:true}).then(()=>{
+    currentProfile.doctorProfile = doctorProfile;
+    currentProfile.isDoctor = true;
+    document.getElementById('medDoctorRegisterPanel').style.display='none';
+    medListenersAttached = false;
+    initMedicalPage();
+  }).catch(err=>{
+    errEl.textContent = err.message;
+    errEl.style.display='block';
+  });
+}
+
+function setDoctorStatusButtons(status){
+  document.getElementById('docStatusOnlineBtn').classList.toggle('on', status==='online');
+  document.getElementById('docStatusOfflineBtn').classList.toggle('on', status!=='online');
+}
+function setDoctorStatus(status){
+  db.collection('users').doc(currentUser.uid).update({'doctorProfile.status': status}).then(()=>{
+    currentProfile.doctorProfile.status = status;
+    setDoctorStatusButtons(status);
+  }).catch(err=>alert(err.message));
+}
+
+function saveDoctorProfileEdits(){
+  const errEl = document.getElementById('docEditError');
+  errEl.style.display='none';
+  const specialty = document.getElementById('docEditSpecialty').value.trim();
+  const feeType = document.getElementById('docEditFeeType').value;
+  const fee = feeType==='paid' ? (parseFloat(document.getElementById('docEditFeeAmount').value)||0) : 0;
+  const bio = document.getElementById('docEditBio').value.trim();
+  if(!specialty){ errEl.textContent='Please enter your specialty.'; errEl.style.display='block'; return; }
+  db.collection('users').doc(currentUser.uid).update({
+    'doctorProfile.specialty': specialty,
+    'doctorProfile.feeType': feeType,
+    'doctorProfile.fee': fee,
+    'doctorProfile.bio': bio
+  }).then(()=>{
+    Object.assign(currentProfile.doctorProfile, {specialty, feeType, fee, bio});
+    alert('Profile updated.');
+  }).catch(err=>{ errEl.textContent = err.message; errEl.style.display='block'; });
+}
+
+/* ---- animals ---- */
+function attachAnimalsListener(){
+  if(unsubAnimals) unsubAnimals();
+  unsubAnimals = db.collection('animals').where('ownerUid','==',currentUser.uid)
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      cachedAnimals = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderAnimalList();
+    }, err=>{
+      console.warn('Animals listener error:', err);
+      document.getElementById('animalListWrap').innerHTML = `<div class="empty-state">Could not load animals: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+function renderAnimalList(){
+  const wrap = document.getElementById('animalListWrap');
+  if(!cachedAnimals.length){
+    wrap.innerHTML = `<div class="empty-state">No animals yet. Add one above to start a consultation.</div>`;
+    return;
+  }
+  wrap.innerHTML = cachedAnimals.map(a=>`
+    <div class="card animal-card">
+      <div class="ac-body">
+        <h4>${escapeHtml(a.name)} <span style="font-weight:400;color:rgba(18,32,26,.5);">· ${escapeHtml(a.species)}</span></h4>
+        <p>${[a.breed, a.age].filter(Boolean).map(escapeHtml).join(' · ') || 'No extra details'}</p>
+        <span class="aid-chip">${escapeHtml(a.animalId)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function submitAnimal(){
+  const errEl = document.getElementById('animalError');
+  errEl.style.display='none';
+  const species = document.getElementById('animalSpecies').value;
+  const name = document.getElementById('animalName').value.trim();
+  const breed = document.getElementById('animalBreed').value.trim();
+  const age = document.getElementById('animalAge').value.trim();
+  const notes = document.getElementById('animalNotes').value.trim();
+  if(!name){ errEl.textContent='Please give this animal a name or batch label.'; errEl.style.display='block'; return; }
+  const animalId = genQuickId(species.slice(0,3).toUpperCase());
+  db.collection('animals').add({
+    ownerUid: currentUser.uid, ownerName: currentProfile.name, animalId, species, name, breed, age, notes,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{
+    document.getElementById('animalName').value='';
+    document.getElementById('animalBreed').value='';
+    document.getElementById('animalAge').value='';
+    document.getElementById('animalNotes').value='';
+    errEl.style.display='none';
+  }).catch(err=>{ errEl.textContent = err.message; errEl.style.display='block'; });
+}
+
+/* ---- find a doctor ---- */
+function attachDoctorsListener(){
+  if(unsubDoctors) unsubDoctors();
+  unsubDoctors = db.collection('users').where('isDoctor','==',true)
+    .onSnapshot(snap=>{
+      cachedDoctors = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+      renderDoctorList();
+    }, err=>{
+      console.warn('Doctors listener error:', err);
+      document.getElementById('doctorListWrap').innerHTML = `<div class="empty-state">Could not load doctors: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+function renderDoctorList(){
+  const nameFilter = (document.getElementById('docSearchName').value||'').trim().toLowerCase();
+  const statusFilter = document.getElementById('docSearchStatus').value;
+  const feeFilter = document.getElementById('docSearchFee').value;
+  const list = cachedDoctors.filter(d=>{
+    if(nameFilter && !(d.name||'').toLowerCase().includes(nameFilter)) return false;
+    const status = (d.doctorProfile && d.doctorProfile.status) || 'offline';
+    if(statusFilter!=='all' && status!==statusFilter) return false;
+    const feeType = (d.doctorProfile && d.doctorProfile.feeType) || 'free';
+    if(feeFilter!=='all' && feeType!==feeFilter) return false;
+    return true;
+  });
+  const wrap = document.getElementById('doctorListWrap');
+  if(!list.length){
+    wrap.innerHTML = `<div class="empty-state">No doctors match yet. Try widening your search.</div>`;
+    return;
+  }
+  wrap.innerHTML = list.map(d=>{
+    const dp = d.doctorProfile||{};
+    const status = dp.status||'offline';
+    const feeLabel = dp.feeType==='paid' ? ('৳'+(dp.fee||0)+' / session') : 'Free';
+    return `
+    <div class="card doctor-card">
+      <div class="avatar">${escapeHtml((d.name||'?').charAt(0).toUpperCase())}</div>
+      <div class="dc-body">
+        <h3>${escapeHtml(d.name||'Doctor')}</h3>
+        <div class="dc-spec">${escapeHtml(dp.specialty||'General veterinarian')}</div>
+        ${dp.bio ? `<div class="dc-bio">${escapeHtml(dp.bio)}</div>` : ''}
+        <div class="dc-meta">
+          <span class="status-pill ${status}">${status==='online' ? '<span class="dot-live"></span>Online now' : 'Offline'}</span>
+          <span class="fee-pill">${feeLabel}</span>
+        </div>
+        <button class="primary-btn" style="width:auto;padding:10px 18px;" onclick='openBookModal(${JSON.stringify(d.uid)})'>Book</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ---- booking modal ---- */
+function openBookModal(doctorUid){
+  bookingDoctor = cachedDoctors.find(d=>d.uid===doctorUid);
+  if(!bookingDoctor) return;
+  if(!cachedAnimals.length){
+    alert('Please add an animal ID first, from the "My Animals" tab.');
+    return;
+  }
+  document.getElementById('bookDoctorName').textContent = bookingDoctor.name || 'this doctor';
+  const sel = document.getElementById('bookAnimalSelect');
+  sel.innerHTML = cachedAnimals.map(a=>`<option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.animalId)})</option>`).join('');
+  setBookMode('text');
+  setBookWhen('now');
+  document.getElementById('bookNote').value='';
+  const dp = bookingDoctor.doctorProfile||{};
+  document.getElementById('bookFeeNote').textContent = dp.feeType==='paid'
+    ? ('This doctor charges ৳'+(dp.fee||0)+' per consultation.')
+    : 'This doctor offers free consultations.';
+  document.getElementById('bookError').style.display='none';
+  document.getElementById('bookModalOverlay').style.display='flex';
+}
+function closeBookModal(){
+  document.getElementById('bookModalOverlay').style.display='none';
+  bookingDoctor = null;
+}
+function setBookMode(mode){
+  bookMode = mode;
+  ['Text','Voice','Video'].forEach(m=>{
+    document.getElementById('bookMode'+m).classList.toggle('on', m.toLowerCase()===mode);
+  });
+}
+function setBookWhen(when){
+  bookWhen = when;
+  document.getElementById('bookWhenNow').classList.toggle('on', when==='now');
+  document.getElementById('bookWhenLater').classList.toggle('on', when==='later');
+  document.getElementById('bookScheduleWrap').style.display = when==='later' ? 'block' : 'none';
+}
+
+function submitBooking(){
+  const errEl = document.getElementById('bookError');
+  errEl.style.display='none';
+  if(!bookingDoctor) return;
+  const animalDocId = document.getElementById('bookAnimalSelect').value;
+  const animal = cachedAnimals.find(a=>a.id===animalDocId);
+  if(!animal){ errEl.textContent='Please select an animal.'; errEl.style.display='block'; return; }
+  let scheduledAt = null;
+  if(bookWhen==='later'){
+    const raw = document.getElementById('bookScheduleTime').value;
+    if(!raw){ errEl.textContent='Please pick a time.'; errEl.style.display='block'; return; }
+    scheduledAt = firebase.firestore.Timestamp.fromDate(new Date(raw));
+  }
+  const note = document.getElementById('bookNote').value.trim();
+  const dp = bookingDoctor.doctorProfile||{};
+  const appt = {
+    userUid: currentUser.uid, userName: currentProfile.name,
+    doctorUid: bookingDoctor.uid, doctorName: bookingDoctor.name,
+    animalDocId: animal.id, animalId: animal.animalId, animalName: animal.name, animalSpecies: animal.species,
+    mode: bookMode, requestedWhen: bookWhen, scheduledAt,
+    note, feeType: dp.feeType||'free', fee: dp.fee||0,
+    status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('medAppointments').add(appt).then(ref=>{
+    if(note){
+      ref.collection('messages').add({from: currentUser.uid, type:'text', text: note, at: firebase.firestore.FieldValue.serverTimestamp()});
+    }
+    closeBookModal();
+    openMedRoom(ref.id);
+  }).catch(err=>{ errEl.textContent = err.message; errEl.style.display='block'; });
+}
+
+/* ---- farmer appointments ---- */
+function attachFarmerApptsListener(){
+  if(unsubFarmerAppts) unsubFarmerAppts();
+  unsubFarmerAppts = db.collection('medAppointments').where('userUid','==',currentUser.uid)
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      cachedFarmerAppts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderFarmerApptList();
+    }, err=>{
+      console.warn('Appointments listener error:', err);
+      document.getElementById('apptListWrap').innerHTML = `<div class="empty-state">Could not load appointments: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+function renderFarmerApptList(){
+  const wrap = document.getElementById('apptListWrap');
+  if(!cachedFarmerAppts.length){
+    wrap.innerHTML = `<div class="empty-state">No appointments yet. Find a doctor to get started.</div>`;
+    return;
+  }
+  wrap.innerHTML = cachedFarmerAppts.map(a=>`
+    <div class="card appt-card" onclick="openMedRoom('${a.id}')">
+      <div class="ac-body">
+        <h4>${escapeHtml(a.doctorName||'Doctor')}</h4>
+        <p>${escapeHtml(a.animalName||'')} (${escapeHtml(a.animalId||'')}) · ${escapeHtml(a.mode)} · ${a.scheduledAt ? fmtWhen(a.scheduledAt) : 'ASAP'}</p>
+      </div>
+      <span class="badge-severity ${statusSevClass(a.status)}">${statusLabel(a.status)}</span>
+    </div>
+  `).join('');
+}
+
+/* ---- prescriptions (farmer) ---- */
+function attachRxListener(){
+  if(unsubRx) unsubRx();
+  unsubRx = db.collection('prescriptions').where('userUid','==',currentUser.uid)
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      cachedRx = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderRxList();
+    }, err=>{
+      console.warn('Prescriptions listener error:', err);
+      document.getElementById('rxListWrap').innerHTML = `<div class="empty-state">Could not load prescriptions: ${escapeHtml(err.message)}</div>`;
+    });
+}
+function renderRxList(){
+  const wrap = document.getElementById('rxListWrap');
+  if(!cachedRx.length){
+    wrap.innerHTML = `<div class="empty-state">No prescriptions yet.</div>`;
+    return;
+  }
+  wrap.innerHTML = cachedRx.map(rxCardHTML).join('');
+}
+function rxCardHTML(rx){
+  return `
+    <div class="card rx-card">
+      <h4>${escapeHtml(rx.animalName||'')} <span style="font-weight:400;color:rgba(18,32,26,.5);">· ${escapeHtml(rx.animalId||'')}</span></h4>
+      <div class="rx-meta">By ${escapeHtml(rx.doctorName||'Doctor')} · ${rx.createdAt ? fmtWhen(rx.createdAt) : ''}</div>
+      ${(rx.medicines||[]).map(m=>`
+        <div class="rx-med-row">
+          <span class="rmed-name">${escapeHtml(m.name)}</span>
+          <span class="rmed-detail">${escapeHtml(m.dosage||'')}<br>${escapeHtml(m.frequency||'')}${m.duration ? ' · '+escapeHtml(m.duration) : ''}</span>
+        </div>
+      `).join('')}
+      ${rx.notes ? `<div class="rx-notes">${escapeHtml(rx.notes)}</div>` : ''}
+    </div>
+  `;
+}
+
+/* ---- doctor requests / appointments ---- */
+function attachDoctorRequestsListener(){
+  if(unsubDocRequests) unsubDocRequests();
+  unsubDocRequests = db.collection('medAppointments')
+    .where('doctorUid','==',currentUser.uid).where('status','==','pending')
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      cachedDocRequests = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderDocRequests();
+    }, err=>{
+      console.warn('Requests listener error:', err);
+      document.getElementById('docRequestsWrap').innerHTML = `<div class="empty-state">Could not load requests: ${escapeHtml(err.message)}</div>`;
+    });
+}
+function renderDocRequests(){
+  const wrap = document.getElementById('docRequestsWrap');
+  if(!cachedDocRequests.length){
+    wrap.innerHTML = `<div class="empty-state">No pending requests right now.</div>`;
+    return;
+  }
+  wrap.innerHTML = cachedDocRequests.map(a=>`
+    <div class="card appt-card" onclick="openMedRoom('${a.id}')">
+      <div class="ac-body">
+        <h4>${escapeHtml(a.userName||'Farmer')}</h4>
+        <p>${escapeHtml(a.animalName||'')} (${escapeHtml(a.animalId||'')}, ${escapeHtml(a.animalSpecies||'')}) · ${escapeHtml(a.mode)} · ${a.scheduledAt ? fmtWhen(a.scheduledAt) : 'ASAP'}</p>
+      </div>
+      <span class="badge-severity sev-med">New</span>
+    </div>
+  `).join('');
+}
+
+function attachDoctorApptsListener(){
+  if(unsubDocAppts) unsubDocAppts();
+  unsubDocAppts = db.collection('medAppointments')
+    .where('doctorUid','==',currentUser.uid).where('status','in',['accepted','completed'])
+    .orderBy('createdAt','desc')
+    .onSnapshot(snap=>{
+      cachedDocAppts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderDocAppts();
+    }, err=>{
+      console.warn('Doctor appointments listener error:', err);
+      document.getElementById('docApptListWrap').innerHTML = `<div class="empty-state">Could not load appointments: ${escapeHtml(err.message)}</div>`;
+    });
+}
+function renderDocAppts(){
+  const wrap = document.getElementById('docApptListWrap');
+  if(!cachedDocAppts.length){
+    wrap.innerHTML = `<div class="empty-state">No appointments yet.</div>`;
+    return;
+  }
+  wrap.innerHTML = cachedDocAppts.map(a=>`
+    <div class="card appt-card" onclick="openMedRoom('${a.id}')">
+      <div class="ac-body">
+        <h4>${escapeHtml(a.userName||'Farmer')}</h4>
+        <p>${escapeHtml(a.animalName||'')} (${escapeHtml(a.animalId||'')}) · ${escapeHtml(a.mode)} · ${a.scheduledAt ? fmtWhen(a.scheduledAt) : 'ASAP'}</p>
+      </div>
+      <span class="badge-severity ${statusSevClass(a.status)}">${statusLabel(a.status)}</span>
+    </div>
+  `).join('');
+}
+
+/* ---- consultation room ---- */
+function openMedRoom(apptId){
+  currentRoomApptId = apptId;
+  document.getElementById('medRoom').style.display='block';
+  document.getElementById('medFarmerView').style.display = 'none';
+  document.getElementById('medDoctorView').style.display = 'none';
+  document.getElementById('medDoctorRegisterPanel').style.display='none';
+  document.getElementById('prescriptionForm').style.display='none';
+  window.scrollTo({top:0, behavior:'smooth'});
+
+  if(unsubRoomAppt) unsubRoomAppt();
+  unsubRoomAppt = db.collection('medAppointments').doc(apptId).onSnapshot(doc=>{
+    if(!doc.exists) return;
+    currentRoomAppt = {id:doc.id, ...doc.data()};
+    renderRoomHeader();
+  });
+
+  if(unsubRoomMessages) unsubRoomMessages();
+  unsubRoomMessages = db.collection('medAppointments').doc(apptId).collection('messages').orderBy('at','asc')
+    .onSnapshot(snap=>{
+      renderRoomThread(snap.docs.map(d=>({id:d.id, ...d.data()})));
+    });
+
+  if(unsubCallWatch) unsubCallWatch();
+  unsubCallWatch = db.collection('medAppointments').doc(apptId).collection('call').doc('session').onSnapshot(doc=>{
+    const data = doc.data();
+    const banner = document.getElementById('incomingCallBanner');
+    if(!data || !data.active){
+      if(banner) banner.style.display='none';
+      return;
+    }
+    if(!callIsCaller && data.callerUid !== currentUser.uid && !pc){
+      if(banner){
+        banner.querySelector('.ic-text').textContent = `Incoming ${data.mode} call…`;
+        banner.style.display='flex';
+      }
+    }
+  });
+}
+
+function closeMedRoom(){
+  if(pc) endCall();
+  document.getElementById('medRoom').style.display='none';
+  if(unsubRoomAppt){ unsubRoomAppt(); unsubRoomAppt=null; }
+  if(unsubRoomMessages){ unsubRoomMessages(); unsubRoomMessages=null; }
+  if(unsubCallWatch){ unsubCallWatch(); unsubCallWatch=null; }
+  document.getElementById('incomingCallBanner').style.display='none';
+  currentRoomApptId = null; currentRoomAppt = null;
+  const isDoctor = !!currentProfile.doctorProfile;
+  document.getElementById('medFarmerView').style.display = isDoctor ? 'none' : 'block';
+  document.getElementById('medDoctorView').style.display = isDoctor ? 'block' : 'none';
+}
+
+function renderRoomHeader(){
+  const a = currentRoomAppt;
+  if(!a) return;
+  const isDoctor = a.doctorUid === currentUser.uid;
+  const partnerName = isDoctor ? a.userName : a.doctorName;
+  document.getElementById('roomAvatar').textContent = (partnerName||'?').charAt(0).toUpperCase();
+  document.getElementById('roomPartnerName').textContent = partnerName || '—';
+  document.getElementById('roomAnimalLine').textContent = `${a.animalName||''} (${a.animalId||''}, ${a.animalSpecies||''}) · ${a.mode}${a.scheduledAt ? ' · '+fmtWhen(a.scheduledAt) : ''}`;
+  const badge = document.getElementById('roomStatusBadge');
+  badge.className = 'badge-severity ' + statusSevClass(a.status);
+  badge.textContent = statusLabel(a.status);
+
+  const pendingNote = document.getElementById('roomPendingNote');
+  const acceptBar = document.getElementById('roomAcceptDeclineBar');
+  const toolbar = document.getElementById('roomToolbar');
+  const doctorActions = document.getElementById('roomDoctorActions');
+
+  if(a.status==='pending'){
+    if(isDoctor){
+      pendingNote.style.display='none';
+      acceptBar.style.display='flex';
+    } else {
+      pendingNote.style.display='block';
+      pendingNote.textContent = 'Waiting for the doctor to accept your request…';
+      acceptBar.style.display='none';
+    }
+    toolbar.style.display = 'none';
+    doctorActions.style.display = 'none';
+  } else if(a.status==='declined'){
+    pendingNote.style.display='block';
+    pendingNote.textContent = 'This request was declined.';
+    acceptBar.style.display='none';
+    toolbar.style.display='none';
+    doctorActions.style.display='none';
+  } else {
+    pendingNote.style.display='none';
+    acceptBar.style.display='none';
+    toolbar.style.display='flex';
+    doctorActions.style.display = (isDoctor && a.status==='accepted') ? 'block' : 'none';
+  }
+}
+
+function respondToAppointment(accept){
+  if(!currentRoomApptId) return;
+  const updates = {status: accept ? 'accepted' : 'declined'};
+  const timeRaw = document.getElementById('roomAcceptTime').value;
+  if(accept && timeRaw){
+    updates.scheduledAt = firebase.firestore.Timestamp.fromDate(new Date(timeRaw));
+  }
+  db.collection('medAppointments').doc(currentRoomApptId).update(updates).then(()=>{
+    db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+      from:'system', type:'system',
+      text: accept ? 'The doctor accepted this appointment.' : 'The doctor declined this appointment.',
+      at: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }).catch(err=>alert(err.message));
+}
+
+function markAppointmentCompleted(){
+  if(!currentRoomApptId) return;
+  db.collection('medAppointments').doc(currentRoomApptId).update({status:'completed'}).catch(err=>alert(err.message));
+}
+
+function renderRoomThread(messages){
+  const wrap = document.getElementById('roomThread');
+  wrap.innerHTML = messages.map(m=>roomMsgHTML(m)).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function roomMsgHTML(m){
+  if(m.type==='system'){
+    return `<div class="msg system">${escapeHtml(m.text||'')}</div>`;
+  }
+  const mine = m.from === currentUser.uid;
+  const cls = 'msg ' + (mine ? 'mine' : 'theirs');
+  if(m.type==='text'){
+    return `<div class="${cls}">${escapeHtml(m.text||'')}</div>`;
+  }
+  if(m.type==='image'){
+    return `<div class="${cls}"><img src="${m.url}" alt="Photo"></div>`;
+  }
+  if(m.type==='clip'){
+    const isVideo = m.clipType!=='audio';
+    return `<div class="${cls}"><div class="clip-label">${m.duration||0}s ${isVideo?'video':'voice'} clip</div>${isVideo ? `<video src="${m.url}" controls></video>` : `<audio src="${m.url}" controls></audio>`}</div>`;
+  }
+  if(m.type==='prescription'){
+    return `<div class="msg rx-msg"><h4>🩺 Prescription</h4>${(m.medicines||[]).map(med=>`
+      <div class="rx-med-row"><span class="rmed-name">${escapeHtml(med.name)}</span><span class="rmed-detail">${escapeHtml(med.dosage||'')}<br>${escapeHtml(med.frequency||'')}${med.duration?' · '+escapeHtml(med.duration):''}</span></div>
+    `).join('')}${m.notes ? `<div class="rx-notes">${escapeHtml(m.notes)}</div>` : ''}</div>`;
+  }
+  return '';
+}
+
+function sendTextMessage(){
+  const input = document.getElementById('roomMsgInput');
+  const text = input.value.trim();
+  if(!text || !currentRoomApptId) return;
+  db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+    from: currentUser.uid, type:'text', text, at: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  input.value='';
+}
+document.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && document.activeElement && document.activeElement.id==='roomMsgInput'){
+    sendTextMessage();
+  }
+});
+
+function sendImageMessage(file){
+  if(!file || !currentRoomApptId) return;
+  const path = `medical/${currentRoomApptId}/${Date.now()}_${file.name}`;
+  const ref = storage.ref(path);
+  ref.put(file).then(snap=>snap.ref.getDownloadURL()).then(url=>{
+    return db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+      from: currentUser.uid, type:'image', url, at: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }).catch(err=>alert('Could not upload photo: '+err.message));
+  document.getElementById('roomImgInput').value='';
+}
+
+/* ---- 10-60s clip recording (video, falls back to audio-only) ---- */
+function toggleClipRecording(){
+  if(mediaRecorder && mediaRecorder.state==='recording'){
+    stopClipRecording();
+  } else {
+    startClipRecording();
+  }
+}
+
+async function startClipRecording(){
+  if(!currentRoomApptId) return;
+  try{
+    recordStream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+    recordKind = 'video';
+  } catch(e){
+    try{
+      recordStream = await navigator.mediaDevices.getUserMedia({audio:true});
+      recordKind = 'audio';
+    } catch(e2){
+      alert('Camera/microphone permission is needed to record a clip.');
+      return;
+    }
+  }
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(recordStream);
+  mediaRecorder.ondataavailable = e=>{ if(e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = ()=>{
+    recordStream.getTracks().forEach(t=>t.stop());
+    const blob = new Blob(recordedChunks, {type: recordKind==='video' ? 'video/webm' : 'audio/webm'});
+    const finalSeconds = recordSeconds;
+    if(finalSeconds < 10){
+      alert('Clips must be at least 10 seconds. Please try again.');
+    } else {
+      uploadClip(blob, finalSeconds, recordKind);
+    }
+    recordSeconds = 0;
+    document.getElementById('clipRecordBar').style.display='none';
+    document.getElementById('roomRecordBtn').classList.remove('recording');
+    clearInterval(recordTimerHandle);
+  };
+  mediaRecorder.start();
+  recordSeconds = 0;
+  document.getElementById('clipTimer').textContent = '0';
+  document.getElementById('clipRecordBar').style.display='flex';
+  document.getElementById('roomRecordBtn').classList.add('recording');
+  recordTimerHandle = setInterval(()=>{
+    recordSeconds++;
+    document.getElementById('clipTimer').textContent = recordSeconds;
+    if(recordSeconds>=60) stopClipRecording();
+  }, 1000);
+}
+
+function stopClipRecording(){
+  if(mediaRecorder && mediaRecorder.state==='recording'){
+    mediaRecorder.stop();
+  }
+}
+
+function uploadClip(blob, duration, kind){
+  const path = `medical/${currentRoomApptId}/clip_${Date.now()}.webm`;
+  const ref = storage.ref(path);
+  ref.put(blob).then(snap=>snap.ref.getDownloadURL()).then(url=>{
+    return db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+      from: currentUser.uid, type:'clip', clipType: kind, url, duration, at: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }).catch(err=>alert('Could not upload clip: '+err.message));
+}
+
+/* ---- prescriptions (doctor writes) ---- */
+function openPrescriptionForm(){
+  document.getElementById('prescriptionForm').style.display='block';
+  document.getElementById('rxMedsWrap').innerHTML='';
+  rxMedCount = 0;
+  addRxMedRow();
+  document.getElementById('rxNotes').value='';
+  document.getElementById('rxError').style.display='none';
+}
+
+function addRxMedRow(){
+  rxMedCount++;
+  const div = document.createElement('div');
+  div.className='form-grid';
+  div.style.marginBottom='6px';
+  div.innerHTML = `
+    <div class="field"><label>Medicine name</label><input type="text" class="rx-name" placeholder="e.g. Amprolium"></div>
+    <div class="field"><label>Dosage</label><input type="text" class="rx-dosage" placeholder="e.g. 1 tablet"></div>
+    <div class="field"><label>When to take</label><input type="text" class="rx-frequency" placeholder="e.g. Twice daily, morning &amp; night"></div>
+    <div class="field"><label>Duration</label><input type="text" class="rx-duration" placeholder="e.g. 5 days"></div>
+  `;
+  document.getElementById('rxMedsWrap').appendChild(div);
+}
+
+function sendPrescription(){
+  const errEl = document.getElementById('rxError');
+  errEl.style.display='none';
+  if(!currentRoomAppt || !currentRoomApptId) return;
+  const rows = document.querySelectorAll('#rxMedsWrap > div');
+  const medicines = [];
+  rows.forEach(row=>{
+    const name = row.querySelector('.rx-name').value.trim();
+    if(!name) return;
+    medicines.push({
+      name,
+      dosage: row.querySelector('.rx-dosage').value.trim(),
+      frequency: row.querySelector('.rx-frequency').value.trim(),
+      duration: row.querySelector('.rx-duration').value.trim()
+    });
+  });
+  if(!medicines.length){
+    errEl.textContent = 'Please add at least one medicine.';
+    errEl.style.display='block';
+    return;
+  }
+  const notes = document.getElementById('rxNotes').value.trim();
+  const a = currentRoomAppt;
+  const rx = {
+    appointmentId: currentRoomApptId, doctorUid: currentUser.uid, doctorName: currentProfile.name,
+    userUid: a.userUid, animalDocId: a.animalDocId, animalId: a.animalId, animalName: a.animalName,
+    medicines, notes, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('prescriptions').add(rx).then(()=>{
+    return db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+      from: currentUser.uid, type:'prescription', medicines, notes, at: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }).then(()=>{
+    document.getElementById('prescriptionForm').style.display='none';
+  }).catch(err=>{ errEl.textContent = err.message; errEl.style.display='block'; });
+}
+
+/* ---- WebRTC voice / video calls, signaled through Firestore ---- */
+function setupPeerConnection(){
+  pc = new RTCPeerConnection(RTC_CONFIG);
+  pc.ontrack = e=>{
+    document.getElementById('remoteVideo').srcObject = e.streams[0];
+  };
+}
+
+async function startCall(mode){
+  if(!currentRoomApptId) return;
+  callMode = mode;
+  callIsCaller = true;
+  setupPeerConnection();
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({video: mode==='video', audio:true});
+  } catch(e){
+    alert('Camera/microphone permission is needed to call.');
+    pc.close(); pc=null;
+    return;
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+  document.getElementById('localVideo').style.display = mode==='video' ? 'block':'none';
+  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+  document.getElementById('callOverlay').style.display='flex';
+  document.getElementById('callStatusText').textContent = 'Calling…';
+
+  const sessionRef = db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session');
+  const callerCands = sessionRef.collection('callerCandidates');
+  pc.onicecandidate = e=>{
+    if(e.candidate) callerCands.add(e.candidate.toJSON());
+  };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await sessionRef.set({
+    offer: {type: offer.type, sdp: offer.sdp}, callerUid: currentUser.uid, mode, active:true,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  callSessionUnsub = sessionRef.onSnapshot(doc=>{
+    const data = doc.data();
+    if(!data) return;
+    if(!data.active){ endCall(true); return; }
+    if(data.answer && pc && !pc.currentRemoteDescription){
+      pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      document.getElementById('callStatusText').textContent = 'Connected';
+    }
+  });
+  callCandUnsub = sessionRef.collection('calleeCandidates').onSnapshot(snap=>{
+    snap.docChanges().forEach(change=>{
+      if(change.type==='added' && pc){
+        pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(()=>{});
+      }
+    });
+  });
+
+  db.collection('medAppointments').doc(currentRoomApptId).collection('messages').add({
+    from:'system', type:'system', text: `${currentProfile.name} started a ${mode} call.`,
+    at: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function acceptIncomingCall(){
+  document.getElementById('incomingCallBanner').style.display='none';
+  if(!currentRoomApptId) return;
+  callIsCaller = false;
+  const sessionRef = db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session');
+  const doc = await sessionRef.get();
+  const data = doc.data();
+  if(!data || !data.offer) return;
+  callMode = data.mode;
+  setupPeerConnection();
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({video: callMode==='video', audio:true});
+  } catch(e){
+    alert('Camera/microphone permission is needed to answer.');
+    pc.close(); pc=null;
+    return;
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+  document.getElementById('localVideo').style.display = callMode==='video' ? 'block':'none';
+  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+  document.getElementById('callOverlay').style.display='flex';
+  document.getElementById('callStatusText').textContent = 'Connecting…';
+
+  const calleeCands = sessionRef.collection('calleeCandidates');
+  pc.onicecandidate = e=>{ if(e.candidate) calleeCands.add(e.candidate.toJSON()); };
+
+  await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await sessionRef.update({answer: {type:answer.type, sdp:answer.sdp}});
+
+  callSessionUnsub = sessionRef.onSnapshot(doc2=>{
+    const d2 = doc2.data();
+    if(d2 && !d2.active) endCall(true);
+  });
+  callCandUnsub = sessionRef.collection('callerCandidates').onSnapshot(snap=>{
+    snap.docChanges().forEach(change=>{
+      if(change.type==='added' && pc){
+        pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(()=>{});
+      }
+    });
+  });
+  document.getElementById('callStatusText').textContent = 'Connected';
+}
+
+function declineIncomingCall(){
+  document.getElementById('incomingCallBanner').style.display='none';
+  if(currentRoomApptId){
+    db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session').update({active:false}).catch(()=>{});
+  }
+}
+
+function endCall(remoteEnded){
+  if(currentRoomApptId && !remoteEnded){
+    db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session').set({active:false}, {merge:true}).catch(()=>{});
+  }
+  if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; }
+  if(pc){ pc.close(); pc=null; }
+  if(callSessionUnsub){ callSessionUnsub(); callSessionUnsub=null; }
+  if(callCandUnsub){ callCandUnsub(); callCandUnsub=null; }
+  callIsCaller = false;
+  document.getElementById('callOverlay').style.display='none';
+  document.getElementById('remoteVideo').srcObject=null;
+  document.getElementById('localVideo').srcObject=null;
+}
+
+function toggleCallMute(){
+  if(!localStream) return;
+  const track = localStream.getAudioTracks()[0];
+  if(!track) return;
+  track.enabled = !track.enabled;
+  document.getElementById('callMuteBtn').textContent = track.enabled ? 'Mute' : 'Unmute';
+}
+function toggleCallCamera(){
+  if(!localStream) return;
+  const track = localStream.getVideoTracks()[0];
+  if(!track) return;
+  track.enabled = !track.enabled;
+  document.getElementById('callCamBtn').textContent = track.enabled ? 'Camera off' : 'Camera on';
+}
