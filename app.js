@@ -10,6 +10,8 @@ const firebaseConfig = {
 };
 
 
+
+
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -19,6 +21,8 @@ const storage = firebase.storage();
 
 /* ================= NAV ================= */
 function showPage(name){
+  if(name!=='medical' && typeof pc !== 'undefined' && pc){ endCall(); }
+  if(name!=='medical' && typeof currentRoomApptId !== 'undefined' && currentRoomApptId){ closeMedRoom(); }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -1863,6 +1867,7 @@ function sendMktMessage(){
 }
 
 function detachAllListeners(){
+  if(typeof pc !== 'undefined' && pc){ endCall(); }
   if(unsubListings){ unsubListings(); unsubListings=null; }
   if(unsubConvs){ unsubConvs(); unsubConvs=null; }
   if(unsubMessages){ unsubMessages(); unsubMessages=null; }
@@ -1995,7 +2000,18 @@ let mediaRecorder=null, recordedChunks=[], recordStream=null, recordTimerHandle=
 
 /* webrtc */
 let pc=null, localStream=null, callSessionUnsub=null, callCandUnsub=null, callIsCaller=false, callMode='video';
-const RTC_CONFIG = {iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const RTC_CONFIG = {iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  /* Free public TURN relay (Open Relay Project) — needed because STUN alone fails to
+     connect a meaningful fraction of real mobile/carrier networks. This is a shared,
+     rate-limited free service; fine for pilot-scale use, worth a paid TURN provider
+     before this app has real usage volume. */
+  {urls:'turn:openrelay.metered.ca:80', username:'openrelayproject', credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443', username:'openrelayproject', credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443?transport=tcp', username:'openrelayproject', credential:'openrelayproject'}
+]};
+let callTimeoutHandle = null;
 
 /* ---- helpers ---- */
 function genQuickId(prefix){
@@ -2566,7 +2582,7 @@ function roomMsgHTML(m){
     return `<div class="${cls}"><div class="clip-label">${m.duration||0}s ${isVideo?'video':'voice'} clip</div>${isVideo ? `<video src="${m.url}" controls></video>` : `<audio src="${m.url}" controls></audio>`}</div>`;
   }
   if(m.type==='prescription'){
-    return `<div class="msg rx-msg"><h4>🩺 Prescription</h4>${(m.medicines||[]).map(med=>`
+    return `<div class="msg rx-msg"><h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M19 14c1.5-2 1.5-4.5 1.5-4.5A5.5 5.5 0 0 0 15 4a5.5 5.5 0 0 0-5.5 5.5S9.5 12 8 14"/><path d="M8 14a5.5 5.5 0 0 0 0 8 5.5 5.5 0 0 0 8-8l-4-4"/><circle cx="18" cy="7" r="1"/></svg>Prescription</h4>${(m.medicines||[]).map(med=>`
       <div class="rx-med-row"><span class="rmed-name">${escapeHtml(med.name)}</span><span class="rmed-detail">${escapeHtml(med.dosage||'')}<br>${escapeHtml(med.frequency||'')}${med.duration?' · '+escapeHtml(med.duration):''}</span></div>
     `).join('')}${m.notes ? `<div class="rx-notes">${escapeHtml(m.notes)}</div>` : ''}</div>`;
   }
@@ -2589,6 +2605,9 @@ document.addEventListener('keydown', e=>{
 });
 
 function sendImageMessage(file){
+  alert('Photo sharing is turned off for now (needs Firebase Storage, which requires a paid plan). Use text or a call instead.');
+  return;
+  // eslint-disable-next-line no-unreachable
   if(!file || !currentRoomApptId) return;
   const path = `medical/${currentRoomApptId}/${Date.now()}_${file.name}`;
   const ref = storage.ref(path);
@@ -2610,6 +2629,9 @@ function toggleClipRecording(){
 }
 
 async function startClipRecording(){
+  alert('Voice/video clips are turned off for now (needs Firebase Storage, which requires a paid plan). Use a call instead.');
+  return;
+  // eslint-disable-next-line no-unreachable
   if(!currentRoomApptId) return;
   try{
     recordStream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
@@ -2735,6 +2757,24 @@ function setupPeerConnection(){
   pc.ontrack = e=>{
     document.getElementById('remoteVideo').srcObject = e.streams[0];
   };
+  pc.oniceconnectionstatechange = ()=>{
+    if(!pc) return;
+    const state = pc.iceConnectionState;
+    if(state==='connected' || state==='completed'){
+      clearTimeout(callTimeoutHandle);
+      document.getElementById('callStatusText').textContent = 'Connected';
+    } else if(state==='failed' || state==='disconnected'){
+      document.getElementById('callStatusText').textContent = 'Connection lost — ending call';
+      setTimeout(()=>{ if(pc) endCall(); }, 1500);
+    }
+  };
+  clearTimeout(callTimeoutHandle);
+  callTimeoutHandle = setTimeout(()=>{
+    if(pc && pc.iceConnectionState!=='connected' && pc.iceConnectionState!=='completed'){
+      alert("Couldn't connect the call — this can happen on some mobile networks. Please try again, or use text chat instead.");
+      endCall();
+    }
+  }, 25000);
 }
 
 async function startCall(mode){
@@ -2757,6 +2797,12 @@ async function startCall(mode){
 
   const sessionRef = db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session');
   const callerCands = sessionRef.collection('callerCandidates');
+  const calleeCandsCleanup = sessionRef.collection('calleeCandidates');
+  /* clear leftover ICE candidates from any earlier call in this same appointment */
+  Promise.all([
+    callerCands.get().then(s=>Promise.all(s.docs.map(d=>d.ref.delete()))),
+    calleeCandsCleanup.get().then(s=>Promise.all(s.docs.map(d=>d.ref.delete())))
+  ]).catch(()=>{});
   pc.onicecandidate = e=>{
     if(e.candidate) callerCands.add(e.candidate.toJSON());
   };
@@ -2843,6 +2889,7 @@ function declineIncomingCall(){
 }
 
 function endCall(remoteEnded){
+  clearTimeout(callTimeoutHandle);
   if(currentRoomApptId && !remoteEnded){
     db.collection('medAppointments').doc(currentRoomApptId).collection('call').doc('session').set({active:false}, {merge:true}).catch(()=>{});
   }
