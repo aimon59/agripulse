@@ -12,6 +12,7 @@ const firebaseConfig = {
 
 
 
+
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -34,6 +35,10 @@ function showPage(name){
   }
   if(name==='profile' || name==='marketplace' || name==='myplans' || name==='medical'){
     renderAccountState();
+  }
+  if(name==='home'){
+    renderHomeTasks();
+    renderHomeAppointments();
   }
 }
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -983,8 +988,7 @@ function saveCurrentPlan(){
 function getAllSavedPlans(){
   if(!currentUser) return Promise.resolve([]);
   return db.collection('plans').where('ownerUid','==',currentUser.uid).orderBy('savedAtLocal','desc').get()
-    .then(snap=> snap.docs.map(d=>({id:d.id, ...d.data()})))
-    .catch(err=>{ console.warn('getAllSavedPlans failed:', err); return []; });
+    .then(snap=> snap.docs.map(d=>({id:d.id, ...d.data()})));
 }
 
 function deleteSavedPlan(id){
@@ -997,6 +1001,10 @@ function populateCompareSelects(){
     document.getElementById('compareA').innerHTML = opts;
     document.getElementById('compareB').innerHTML = opts;
     return plans;
+  }).catch(err=>{
+    console.warn('populateCompareSelects failed:', err);
+    document.getElementById('compareGrid').innerHTML = `<div class="empty-state">Could not load your plans: ${escapeHtml(err.message)}</div>`;
+    return [];
   });
 }
 
@@ -1021,6 +1029,9 @@ function renderCompare(){
       return `<div class="card compare-col"><h4>${x.breedName} · ${x.qty.toLocaleString()} ${x.unitWord}s</h4>${rows.map(r=>`<div class="compare-row"><span class="c-label">${r[0]}</span><span class="c-val">${r[1](x)}</span></div>`).join('')}</div>`;
     }
     grid.innerHTML = col(a) + col(b);
+  }).catch(err=>{
+    console.warn('renderCompare failed:', err);
+    grid.innerHTML = `<div class="empty-state">Could not load plans: ${escapeHtml(err.message)}</div>`;
   });
 }
 
@@ -1161,7 +1172,9 @@ async function startPlan(planId){
     "This begins day-by-day tracking from Day 0. You'll see today's tasks here and get reminders while the app stays open. You can stop anytime."
   );
   if(!ok) return;
-  const plans = await getAllSavedPlans();
+  let plans;
+  try{ plans = await getAllSavedPlans(); }
+  catch(err){ alert('Could not load this plan: ' + err.message); return; }
   const plan = plans.find(p=>p.id===planId);
   if(!plan) return;
   const schedule = buildExecutionSchedule(plan.group, plan.cycleDays);
@@ -1193,7 +1206,14 @@ async function stopPlan(id){
 async function renderMyPlansPage(){
   const wrap = document.getElementById('myPlansGridWrap');
   wrap.innerHTML = '<div class="empty-state">Loading your plans…</div>';
-  const [saved, active] = await Promise.all([getAllSavedPlans(), getAllActivePlans()]);
+  let saved, active;
+  try{
+    [saved, active] = await Promise.all([getAllSavedPlans(), getAllActivePlans()]);
+  } catch(err){
+    console.warn('renderMyPlansPage failed:', err);
+    wrap.innerHTML = `<div class="empty-state">Could not load your plans: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
   if(!saved.length){
     wrap.innerHTML = `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M12 8v8"/></svg><div>No saved plans yet. Build one in the Planner, tap "Save this plan", then come back here to start it.</div></div>`;
     return;
@@ -1411,6 +1431,8 @@ function renderAccountState(){
     if(medMain) medMain.style.display = hasProfile ? 'block' : 'none';
     if(hasProfile) initMedicalPage();
   }
+
+  if(typeof renderHomeTasks === 'function'){ renderHomeTasks(); renderHomeAppointments(); }
 }
 
 function setAuthMode(mode){
@@ -1977,6 +1999,109 @@ function detachAllListeners(){
   });
 })();
 
+/* ================= HOME: cursor effects (Home page only) ================= */
+(function(){
+  const dot = document.getElementById('cursorDot');
+  const glow = document.getElementById('cursorGlow');
+  if(!dot || !glow) return;
+
+  function onMove(e){
+    if(!document.getElementById('page-home').classList.contains('active')) return;
+    glow.classList.add('show');
+    glow.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    const overText = e.target.closest && e.target.closest('.mouse-fx-text');
+    if(overText){
+      dot.classList.add('show');
+      dot.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%,-50%) scale(1)`;
+    } else {
+      dot.classList.remove('show');
+    }
+  }
+  function onLeave(){ dot.classList.remove('show'); glow.classList.remove('show'); }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseleave', onLeave);
+})();
+
+/* ================= HOME: real "today's tasks" from active plans + appointment reminders ================= */
+async function renderHomeTasks(){
+  const wrap = document.getElementById('homeTasksWrap');
+  const tag = document.getElementById('homeTasksTag');
+  if(!wrap) return;
+  if(!currentUser || !currentProfile){
+    wrap.innerHTML = `<div class="empty-state" style="padding:24px 10px;">Log in and start a plan to see today's real tasks here. <a href="#" onclick="showPage('profile'); return false;" style="color:var(--canopy-2);font-weight:700;">Go to Profile</a></div>`;
+    if(tag) tag.textContent = 'Not logged in';
+    return;
+  }
+  wrap.innerHTML = `<div class="empty-state" style="padding:24px 10px;">Loading…</div>`;
+  let active;
+  try{ active = await getAllActivePlans(); }
+  catch(err){
+    wrap.innerHTML = `<div class="empty-state" style="padding:24px 10px;">Could not load tasks: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  if(!active.length){
+    wrap.innerHTML = `<div class="empty-state" style="padding:24px 10px;">No active plan yet. <a href="#" onclick="showPage('planner'); return false;" style="color:var(--canopy-2);font-weight:700;">Build one in Planner</a>, save it, then start it from My Plans.</div>`;
+    if(tag) tag.textContent = 'No active plan';
+    return;
+  }
+  const badgeClass = {poultry:'badge-poultry', cow:'badge-cow', goat:'badge-cow', duck:'badge-poultry'};
+  let rows = [];
+  active.forEach(act=>{
+    const dayIndex = currentDayIndex(act.startedAt, act.cycleDays);
+    const todaysMilestones = (act.schedule.milestones||[]).filter(m=>m.day===dayIndex);
+    act.schedule.recurring.forEach(r=>{
+      rows.push({title:r.title, meta:`${r.time} · ${act.breedName}`, group:act.group});
+    });
+    todaysMilestones.forEach(m=>{
+      rows.push({title:m.title+' (milestone)', meta:`${m.time} · ${act.breedName}`, group:act.group});
+    });
+  });
+  wrap.innerHTML = rows.map(r=>`
+    <div class="task-row">
+      <div class="task-check"></div>
+      <div><div class="task-title">${escapeHtml(r.title)}</div><div class="task-meta">${escapeHtml(r.meta)}</div></div>
+      <span class="task-badge ${badgeClass[r.group]||'badge-poultry'}">${escapeHtml(r.group)}</span>
+    </div>
+  `).join('');
+  if(tag) tag.textContent = `${rows.length} task${rows.length===1?'':'s'} today · ${active.length} active plan${active.length===1?'':'s'}`;
+}
+
+async function renderHomeAppointments(){
+  const wrap = document.getElementById('homeApptWrap');
+  if(!wrap) return;
+  if(!currentUser || !currentProfile){ wrap.innerHTML=''; return; }
+  try{
+    const snaps = await Promise.all([
+      db.collection('medAppointments').where('userUid','==',currentUser.uid).where('status','in',['pending','accepted']).get().catch(()=>({docs:[]})),
+      db.collection('medAppointments').where('doctorUid','==',currentUser.uid).where('status','==','pending').get().catch(()=>({docs:[]}))
+    ]);
+    const mine = snaps[0].docs.map(d=>({id:d.id, ...d.data()}));
+    const incoming = snaps[1].docs.map(d=>({id:d.id, ...d.data()}));
+    if(!mine.length && !incoming.length){ wrap.innerHTML=''; return; }
+    let html = '';
+    if(mine.length){
+      const a = mine[0];
+      html += `<div class="card home-appt-card" onclick="showPage('medical')">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 7v6c0 5 4 8 8 9 4-1 8-4 8-9V7l-8-5z"/></svg></div>
+        <div><div class="a-title">${a.status==='pending' ? 'Appointment request pending' : 'Upcoming appointment'} with Dr. ${escapeHtml(a.doctorName||'')}</div>
+        <div class="a-sub">${escapeHtml(a.animalName||'')}${mine.length>1?` · +${mine.length-1} more`:''} — tap to view in Medical</div></div>
+      </div>`;
+    }
+    if(incoming.length){
+      html += `<div class="card home-appt-card" onclick="showPage('medical')">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.7 3.86a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+        <div><div class="a-title">${incoming.length} patient request${incoming.length===1?'':'s'} waiting</div>
+        <div class="a-sub">Tap to accept or decline in Medical</div></div>
+      </div>`;
+    }
+    wrap.innerHTML = html;
+  } catch(err){
+    console.warn('renderHomeAppointments failed:', err);
+    wrap.innerHTML = '';
+  }
+}
+
 /* ================= MEDICAL: real doctor consultations ================= */
 
 /* ---- state ---- */
@@ -2052,6 +2177,7 @@ function initMedicalPage(){
     document.getElementById('docEditFeeType').value = currentProfile.doctorProfile.feeType||'free';
     document.getElementById('docEditFeeAmount').value = currentProfile.doctorProfile.fee||'';
     document.getElementById('docEditFeeAmountWrap').style.display = (currentProfile.doctorProfile.feeType==='paid') ? 'block':'none';
+    document.getElementById('docEditYearsExp').value = currentProfile.doctorProfile.yearsExperience||'';
     setDoctorStatusButtons(currentProfile.doctorProfile.status||'offline');
     attachDoctorRequestsListener();
     attachDoctorApptsListener();
@@ -2090,12 +2216,13 @@ function submitDoctorRegistration(){
   const feeType = document.getElementById('docFeeType').value;
   const fee = feeType==='paid' ? (parseFloat(document.getElementById('docFeeAmount').value)||0) : 0;
   const bio = document.getElementById('docBio').value.trim();
+  const yearsExperience = parseFloat(document.getElementById('docYearsExp').value) || 0;
   if(!specialty){
     errEl.textContent = 'Please enter your specialty.';
     errEl.style.display='block';
     return;
   }
-  const doctorProfile = {specialty, feeType, fee, bio, status:'offline'};
+  const doctorProfile = {specialty, feeType, fee, bio, yearsExperience, status:'offline'};
   db.collection('users').doc(currentUser.uid).set({
     isDoctor:true, doctorProfile, doctorRegisteredAt: firebase.firestore.FieldValue.serverTimestamp()
   }, {merge:true}).then(()=>{
@@ -2128,14 +2255,16 @@ function saveDoctorProfileEdits(){
   const feeType = document.getElementById('docEditFeeType').value;
   const fee = feeType==='paid' ? (parseFloat(document.getElementById('docEditFeeAmount').value)||0) : 0;
   const bio = document.getElementById('docEditBio').value.trim();
+  const yearsExperience = parseFloat(document.getElementById('docEditYearsExp').value) || 0;
   if(!specialty){ errEl.textContent='Please enter your specialty.'; errEl.style.display='block'; return; }
   db.collection('users').doc(currentUser.uid).update({
     'doctorProfile.specialty': specialty,
     'doctorProfile.feeType': feeType,
     'doctorProfile.fee': fee,
-    'doctorProfile.bio': bio
+    'doctorProfile.bio': bio,
+    'doctorProfile.yearsExperience': yearsExperience
   }).then(()=>{
-    Object.assign(currentProfile.doctorProfile, {specialty, feeType, fee, bio});
+    Object.assign(currentProfile.doctorProfile, {specialty, feeType, fee, bio, yearsExperience});
     alert('Profile updated.');
   }).catch(err=>{ errEl.textContent = err.message; errEl.style.display='block'; });
 }
@@ -2228,7 +2357,7 @@ function renderDoctorList(){
     const status = dp.status||'offline';
     const feeLabel = dp.feeType==='paid' ? ('৳'+(dp.fee||0)+' / session') : 'Free';
     return `
-    <div class="card doctor-card">
+    <div class="card doctor-card" style="cursor:pointer;" onclick="openDoctorDetail(${JSON.stringify(d.uid)})">
       <div class="avatar">${escapeHtml((d.name||'?').charAt(0).toUpperCase())}</div>
       <div class="dc-body">
         <h3>${escapeHtml(d.name||'Doctor')}</h3>
@@ -2238,11 +2367,115 @@ function renderDoctorList(){
           <span class="status-pill ${status}">${status==='online' ? '<span class="dot-live"></span>Online now' : 'Offline'}</span>
           <span class="fee-pill">${feeLabel}</span>
         </div>
-        <button class="primary-btn" style="width:auto;padding:10px 18px;" onclick='openBookModal(${JSON.stringify(d.uid)})'>Book</button>
+        <button class="primary-btn" style="width:auto;padding:10px 18px;" onclick='event.stopPropagation(); openBookModal(${JSON.stringify(d.uid)})'>Book</button>
       </div>
     </div>`;
   }).join('');
 }
+
+/* ---- doctor detail profile (full-screen) ---- */
+let ddCurrentUid = null;
+let ddCurrentIsSelf = false;
+
+async function openDoctorDetail(uid){
+  let doc = cachedDoctors.find(d=>d.uid===uid);
+  if(!doc && uid===currentUser.uid && currentProfile.doctorProfile){
+    doc = {uid, name: currentProfile.name, doctorProfile: currentProfile.doctorProfile};
+  }
+  if(!doc){
+    try{
+      const snap = await db.collection('users').doc(uid).get();
+      if(snap.exists) doc = {uid, ...snap.data()};
+    }catch(e){}
+  }
+  if(!doc){ alert('Could not load this doctor profile.'); return; }
+
+  ddCurrentUid = uid;
+  ddCurrentIsSelf = (uid===currentUser.uid);
+  const dp = doc.doctorProfile || {};
+
+  document.getElementById('doctorDetailOverlay').style.display='block';
+  window.scrollTo({top:0});
+  document.getElementById('ddAvatar').textContent = (doc.name||'?').charAt(0).toUpperCase();
+  document.getElementById('ddName').textContent = doc.name || 'Doctor';
+  document.getElementById('ddSpecialty').textContent = dp.specialty || 'General veterinarian';
+  document.getElementById('ddFee').textContent = dp.feeType==='paid' ? `৳${dp.fee||0} / session` : 'Free consultation';
+  document.getElementById('ddExp').textContent = dp.yearsExperience ? `${dp.yearsExperience} yrs` : '—';
+  document.getElementById('ddBio').textContent = dp.bio || "This doctor hasn't added a bio yet.";
+  document.getElementById('ddBookBtn').style.display = ddCurrentIsSelf ? 'none' : 'block';
+  setDdTab('feedback');
+
+  document.getElementById('ddReviewsWrap').innerHTML = '<div class="empty-state">Loading…</div>';
+  document.getElementById('ddRating').innerHTML = '<span class="stars">☆☆☆☆☆</span> <span class="count">Loading…</span>';
+  document.getElementById('ddVisits').textContent = '…';
+  document.getElementById('ddPatients').textContent = '…';
+
+  try{
+    const [reviewSnap, apptSnap] = await Promise.all([
+      db.collection('doctorReviews').where('doctorUid','==',uid).orderBy('createdAt','desc').get(),
+      db.collection('medAppointments').where('doctorUid','==',uid).where('status','==','completed').orderBy('createdAt','desc').get()
+    ]);
+    const reviews = reviewSnap.docs.map(d=>({id:d.id, ...d.data()}));
+    const completed = apptSnap.docs.map(d=>d.data());
+    const patientSet = new Set(completed.map(a=>a.userUid));
+
+    document.getElementById('ddVisits').textContent = completed.length.toLocaleString();
+    document.getElementById('ddPatients').textContent = patientSet.size.toLocaleString();
+
+    if(reviews.length){
+      const avg = reviews.reduce((s,r)=>s+(r.rating||0),0) / reviews.length;
+      document.getElementById('ddRating').innerHTML = `<span class="stars">${starString(avg)}</span> <span class="count">${avg.toFixed(1)} · ${reviews.length} review${reviews.length===1?'':'s'}</span>`;
+      document.getElementById('ddReviewsWrap').innerHTML = reviews.map(r=>`
+        <div class="dd-review">
+          <div class="dd-review-top">
+            <span class="dd-review-name">${escapeHtml(r.farmerName||'Farmer')}</span>
+            <span class="dd-review-date">${r.createdAt && r.createdAt.toDate ? r.createdAt.toDate().toLocaleDateString() : ''}</span>
+          </div>
+          <div class="dd-review-stars">${starString(r.rating||0)}</div>
+          ${r.text ? `<div class="dd-review-text">${escapeHtml(r.text)}</div>` : ''}
+          ${(r.tags&&r.tags.length) ? `<div class="dd-review-tags">${r.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+        </div>
+      `).join('');
+    } else {
+      document.getElementById('ddRating').innerHTML = '<span class="stars">☆☆☆☆☆</span> <span class="count">No reviews yet</span>';
+      document.getElementById('ddReviewsWrap').innerHTML = '<div class="empty-state">No reviews yet.</div>';
+    }
+  } catch(err){
+    console.warn('openDoctorDetail stats failed:', err);
+    document.getElementById('ddReviewsWrap').innerHTML = `<div class="empty-state">Could not load reviews: ${escapeHtml(err.message)}</div>`;
+    document.getElementById('ddVisits').textContent = '—';
+    document.getElementById('ddPatients').textContent = '—';
+  }
+}
+
+function starString(rating){
+  const full = Math.round(rating);
+  return '★'.repeat(Math.max(0,Math.min(5,full))) + '☆'.repeat(5-Math.max(0,Math.min(5,full)));
+}
+
+function closeDoctorDetail(){
+  document.getElementById('doctorDetailOverlay').style.display='none';
+  ddCurrentUid = null;
+}
+
+function setDdTab(tab){
+  document.querySelectorAll('.dd-tab').forEach(t=>t.classList.toggle('on', t.dataset.tab===tab));
+  document.getElementById('ddPanelFeedback').style.display = tab==='feedback' ? 'block' : 'none';
+  document.getElementById('ddPanelAbout').style.display = tab==='about' ? 'block' : 'none';
+}
+
+function bookFromDoctorDetail(){
+  if(!ddCurrentUid || ddCurrentIsSelf) return;
+  const uid = ddCurrentUid;
+  closeDoctorDetail();
+  openBookModal(uid);
+}
+
+function previewMyDoctorProfile(){
+  if(!currentUser) return;
+  openDoctorDetail(currentUser.uid);
+}
+
 
 /* ---- booking modal ---- */
 function openBookModal(doctorUid){
@@ -2328,21 +2561,84 @@ function attachFarmerApptsListener(){
     });
 }
 
+let cachedMyReviewedApptIds = new Set();
+
 function renderFarmerApptList(){
   const wrap = document.getElementById('apptListWrap');
   if(!cachedFarmerAppts.length){
     wrap.innerHTML = `<div class="empty-state">No appointments yet. Find a doctor to get started.</div>`;
     return;
   }
-  wrap.innerHTML = cachedFarmerAppts.map(a=>`
-    <div class="card appt-card" onclick="openMedRoom('${a.id}')">
-      <div class="ac-body">
-        <h4>${escapeHtml(a.doctorName||'Doctor')}</h4>
-        <p>${escapeHtml(a.animalName||'')} (${escapeHtml(a.animalId||'')}) · ${escapeHtml(a.mode)} · ${a.scheduledAt ? fmtWhen(a.scheduledAt) : 'ASAP'}</p>
+  wrap.innerHTML = cachedFarmerAppts.map(a=>{
+    const canReview = a.status==='completed' && !cachedMyReviewedApptIds.has(a.id);
+    return `
+    <div class="card appt-card">
+      <div onclick="openMedRoom('${a.id}')" style="cursor:pointer;">
+        <div class="ac-body">
+          <h4>${escapeHtml(a.doctorName||'Doctor')}</h4>
+          <p>${escapeHtml(a.animalName||'')} (${escapeHtml(a.animalId||'')}) · ${escapeHtml(a.mode)} · ${a.scheduledAt ? fmtWhen(a.scheduledAt) : 'ASAP'}</p>
+        </div>
+        <span class="badge-severity ${statusSevClass(a.status)}">${statusLabel(a.status)}</span>
       </div>
-      <span class="badge-severity ${statusSevClass(a.status)}">${statusLabel(a.status)}</span>
-    </div>
-  `).join('');
+      ${canReview ? `<button class="ghost-btn" style="margin-top:10px;" onclick='event.stopPropagation(); openReviewModal(${JSON.stringify(a.id)}, ${JSON.stringify(a.doctorUid)}, ${JSON.stringify(a.doctorName||"the doctor")})'>Leave feedback</button>` : ''}
+      ${a.status==='completed' && cachedMyReviewedApptIds.has(a.id) ? `<div style="font-size:11.5px;color:rgba(18,32,26,.45);margin-top:8px;">Feedback sent — thank you</div>` : ''}
+    </div>`;
+  }).join('');
+  db.collection('doctorReviews').where('farmerUid','==',currentUser.uid).get().then(snap=>{
+    cachedMyReviewedApptIds = new Set(snap.docs.map(d=>d.data().appointmentId));
+  }).catch(()=>{});
+}
+
+/* ---- leave feedback / review modal ---- */
+let rvApptId = null, rvDoctorUid = null, rvRating = 0, rvTagsSelected = new Set();
+
+function openReviewModal(apptId, doctorUid, doctorName){
+  rvApptId = apptId; rvDoctorUid = doctorUid; rvRating = 0; rvTagsSelected = new Set();
+  document.getElementById('rvDoctorName').textContent = doctorName || 'the doctor';
+  document.getElementById('rvDoctorAvatar').textContent = (doctorName||'?').charAt(0).toUpperCase();
+  document.getElementById('rvText').value = '';
+  document.getElementById('rvError').style.display='none';
+  document.querySelectorAll('#starPicker svg').forEach(s=>s.classList.remove('on'));
+  document.querySelectorAll('.rv-tag').forEach(t=>t.classList.remove('on'));
+  document.getElementById('reviewModalOverlay').style.display='flex';
+}
+function closeReviewModal(){
+  document.getElementById('reviewModalOverlay').style.display='none';
+}
+document.querySelectorAll('#starPicker svg').forEach(star=>{
+  star.addEventListener('click', ()=>{
+    rvRating = parseInt(star.dataset.star,10);
+    document.querySelectorAll('#starPicker svg').forEach(s=>{
+      s.classList.toggle('on', parseInt(s.dataset.star,10) <= rvRating);
+    });
+  });
+});
+document.querySelectorAll('.rv-tag').forEach(tag=>{
+  tag.addEventListener('click', ()=>{
+    const t = tag.dataset.tag;
+    if(rvTagsSelected.has(t)){ rvTagsSelected.delete(t); tag.classList.remove('on'); }
+    else { rvTagsSelected.add(t); tag.classList.add('on'); }
+  });
+});
+function submitDoctorReview(){
+  const errEl = document.getElementById('rvError');
+  errEl.style.display='none';
+  if(!rvRating){ errEl.textContent='Please select a star rating.'; errEl.style.display='block'; return; }
+  const text = document.getElementById('rvText').value.trim();
+  const review = {
+    doctorUid: rvDoctorUid, farmerUid: currentUser.uid, farmerName: currentProfile.name,
+    rating: rvRating, tags: Array.from(rvTagsSelected), text, appointmentId: rvApptId,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  db.collection('doctorReviews').add(review).then(()=>{
+    cachedMyReviewedApptIds.add(rvApptId);
+    closeReviewModal();
+    renderFarmerApptList();
+    alert('Thanks — your review has been sent.');
+  }).catch(err=>{
+    errEl.textContent = err.message;
+    errEl.style.display='block';
+  });
 }
 
 /* ---- prescriptions (farmer) ---- */
