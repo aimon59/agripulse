@@ -51,21 +51,26 @@
 
 <!-- ================= HOME ================= -->
 <section class="page active" id="page-home">
-  <div class="hero">
-    <div>
+  <div class="hero hero-bg-mode">
+    <div id="hero-canvas"></div>
+    <div class="hero-scrim"></div>
+    <div class="hero-text-layer">
       <div class="eyebrow"><span class="dot-live"></span> Live · Updated moments ago</div>
-      <h1>Good morning,This website created by Aimon.<br>Your farm, <em>watched over.</em></h1>
-      <p class="sub">Real-time weather, disease alerts and daily tasks for your poultry and cattle farm — read by AI, so you don't have to check ten different apps.</p>
-      <div class="weather-chip">
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--sky-deep)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A5 5 0 0 0 6.5 19h11z"/></svg>
+      <h1 class="anim-text mouse-fx-text" id="homeHeadline">Good morning, Rahim.<br>Your farm, <em>watched over.</em></h1>
+      <p class="sub anim-text-delay mouse-fx-text">Real-time weather, disease alerts and daily tasks for your poultry and cattle farm — read by AI, so you don't have to check ten different apps.</p>
+      <div class="weather-chip anim-text-delay2">
+        <svg class="weather-chip-icon" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="var(--sky-deep)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A5 5 0 0 0 6.5 19h11z"/></svg>
         <div>
           <span class="temp" id="chip-temp">…</span>
           <div class="meta" id="chip-loc">Getting your location…</div>
         </div>
       </div>
     </div>
-    <div id="hero-canvas"></div>
   </div>
+
+  <!-- cursor effects, Home page only -->
+  <div class="cursor-dot" id="cursorDot"></div>
+  <div class="cursor-glow" id="cursorGlow"></div>
 
   <!-- Weather Card -->
   <div class="card">
@@ -103,36 +108,17 @@
     </div>
   </div>
 
+  <!-- Doctor appointments (if any) -->
+  <div id="homeApptWrap"></div>
+
   <!-- Tasks -->
   <div class="section-title">
     <h2>Today's tasks</h2>
-    <span class="tag">3 of 5 remaining</span>
+    <span class="tag" id="homeTasksTag">From your active plans</span>
   </div>
   <div class="card" style="padding:10px 22px;">
-    <div class="task-row done">
-      <div class="task-check"></div>
-      <div><div class="task-title">Refill water lines — Poultry Shed 1 &amp; 2</div><div class="task-meta">6:00 AM · Completed</div></div>
-      <span class="task-badge badge-poultry">Poultry</span>
-    </div>
-    <div class="task-row">
-      <div class="task-check"></div>
-      <div><div class="task-title">Newcastle disease booster — 240 broilers, batch B</div><div class="task-meta">9:00 AM · Due in 2 hours</div></div>
-      <span class="task-badge badge-poultry">Poultry</span>
-    </div>
-    <div class="task-row">
-      <div class="task-check"></div>
-      <div><div class="task-title">Check hoof of cow #14 (limping reported yesterday)</div><div class="task-meta">11:30 AM</div></div>
-      <span class="task-badge badge-cow">Cow</span>
-    </div>
-    <div class="task-row">
-      <div class="task-check"></div>
-      <div><div class="task-title">Move electrolyte mix into feed — heat advisory</div><div class="task-meta">1:00 PM</div></div>
-      <span class="task-badge badge-poultry">Poultry</span>
-    </div>
-    <div class="task-row">
-      <div class="task-check"></div>
-      <div><div class="task-title">Evening milking &amp; yield log</div><div class="task-meta">5:30 PM</div></div>
-      <span class="task-badge badge-cow">Cow</span>
+    <div id="homeTasksWrap">
+      <div class="empty-state" style="padding:24px 10px;">Loading…</div>
     </div>
   </div>
 
@@ -1010,6 +996,10 @@
           <label>Fee amount (৳ per consultation)</label>
           <input type="number" id="docFeeAmount" placeholder="e.g. 300">
         </div>
+        <div class="field">
+          <label>Years of experience</label>
+          <input type="number" id="docYearsExp" placeholder="e.g. 5">
+        </div>
       </div>
       <div class="field">
         <label>Short bio</label>
@@ -1158,12 +1148,17 @@
               <label>Fee amount (৳ per consultation)</label>
               <input type="number" id="docEditFeeAmount">
             </div>
+            <div class="field">
+              <label>Years of experience</label>
+              <input type="number" id="docEditYearsExp">
+            </div>
           </div>
           <div class="field">
             <label>Short bio</label>
             <input type="text" id="docEditBio">
           </div>
           <button class="primary-btn" onclick="saveDoctorProfileEdits()">Save changes</button>
+          <button class="ghost-btn" style="width:100%;margin-top:10px;" onclick="previewMyDoctorProfile()">Preview my public profile</button>
           <div class="auth-error" id="docEditError"></div>
         </div>
       </div>
@@ -1294,10 +1289,81 @@
       </div>
     </div>
 
+    <!-- Doctor detail profile (full screen, works on PC and mobile alike) -->
+    <div class="dd-overlay" id="doctorDetailOverlay" style="display:none;">
+      <div class="dd-back-row">
+        <button class="ghost-btn" onclick="closeDoctorDetail()">← Back</button>
+      </div>
+      <div class="card dd-profile-card">
+        <div class="dd-top">
+          <div class="dd-avatar" id="ddAvatar">?</div>
+          <div class="dd-info">
+            <h2 id="ddName">Doctor</h2>
+            <div class="dd-spec" id="ddSpecialty">Specialty</div>
+            <div class="dd-rating" id="ddRating"><span class="stars">☆☆☆☆☆</span> <span class="count">No reviews yet</span></div>
+            <div class="dd-fee" id="ddFee">Free consultation</div>
+          </div>
+        </div>
+
+        <div class="dd-stats">
+          <div class="dd-stat"><span class="dd-stat-label">Visits</span><span class="dd-stat-val" id="ddVisits">0</span></div>
+          <div class="dd-stat"><span class="dd-stat-label">Patients</span><span class="dd-stat-val" id="ddPatients">0</span></div>
+          <div class="dd-stat"><span class="dd-stat-label">Exp</span><span class="dd-stat-val" id="ddExp">—</span></div>
+        </div>
+
+        <div class="dd-tabs">
+          <button class="dd-tab on" data-tab="feedback" onclick="setDdTab('feedback')">Feedbacks</button>
+          <button class="dd-tab" data-tab="about" onclick="setDdTab('about')">About</button>
+        </div>
+        <div class="dd-tab-panel" id="ddPanelFeedback">
+          <h4>Last reviews</h4>
+          <div id="ddReviewsWrap"><div class="empty-state">Loading…</div></div>
+        </div>
+        <div class="dd-tab-panel" id="ddPanelAbout" style="display:none;">
+          <p id="ddBio">This doctor hasn't added a bio yet.</p>
+        </div>
+
+        <button class="primary-btn dd-book-btn" id="ddBookBtn" onclick="bookFromDoctorDetail()">Request appointment</button>
+      </div>
+    </div>
+
+    <!-- Leave feedback / review modal -->
+    <div class="modal-overlay" id="reviewModalOverlay" style="display:none;">
+      <div class="card" style="max-width:420px;width:100%;padding:26px;text-align:center;">
+        <h3 style="margin-top:0;font-size:16px;">Feedback</h3>
+        <p style="font-size:13px;color:rgba(18,32,26,.6);">Help us improve by telling us how your consult with <strong id="rvDoctorName">the doctor</strong> went.</p>
+        <div class="dd-avatar" id="rvDoctorAvatar" style="margin:14px auto;">?</div>
+        <div class="star-picker" id="starPicker">
+          <svg data-star="1" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg>
+          <svg data-star="2" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg>
+          <svg data-star="3" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg>
+          <svg data-star="4" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg>
+          <svg data-star="5" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg>
+        </div>
+        <div class="rv-tags" id="rvTags">
+          <button class="rv-tag" data-tag="Professional">Professional</button>
+          <button class="rv-tag" data-tag="Attentive doctor">Attentive doctor</button>
+          <button class="rv-tag" data-tag="Good job">Good job</button>
+          <button class="rv-tag" data-tag="Super">Super</button>
+          <button class="rv-tag" data-tag="Great">Great</button>
+          <button class="rv-tag" data-tag="I recommend it">I recommend it</button>
+          <button class="rv-tag" data-tag="Wonderful">Wonderful</button>
+        </div>
+        <div class="field" style="text-align:left;">
+          <textarea id="rvText" rows="3" placeholder="Tell us more (optional)" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(18,32,26,0.15);background:rgba(255,255,255,0.6);font-family:inherit;font-size:13.5px;"></textarea>
+        </div>
+        <div class="auth-error" id="rvError"></div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button class="ghost-btn" style="flex:1;" onclick="closeReviewModal()">Cancel</button>
+          <button class="solid-btn" style="flex:1;" onclick="submitDoctorReview()">Send review</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </section>
 
-<footer>AgriPulse — built for the people who feed everyone else.</footer>
+<footer>AgriPulse — built for the people who feed everyone else.<br><span style="font-size:11px;opacity:.75;">This site is under construction — built by Aimon.</span></footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
