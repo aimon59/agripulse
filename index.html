@@ -625,6 +625,16 @@
       <h3>Profile</h3>
       <p>Log in, edit your name, unique ID and phone, and see your plans and inbox.</p>
     </div>
+    <div class="card prog-card" onclick="showPage('become-doctor')">
+      <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.5-2 1.5-4.5 1.5-4.5A5.5 5.5 0 0 0 15 4a5.5 5.5 0 0 0-5.5 5.5S9.5 12 8 14"/><path d="M8 14a5.5 5.5 0 0 0 0 8 5.5 5.5 0 0 0 8-8l-4-4"/><circle cx="18" cy="7" r="1"/></svg></div>
+      <h3>Become a Doctor</h3>
+      <p>Apply as a verified vet — upload your certificates for review, then reach farmers in Medical.</p>
+    </div>
+    <div class="card prog-card" id="adminTile" style="display:none;" onclick="showPage('admin-doctors')">
+      <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+      <h3>Doctor Applications</h3>
+      <p>Review and verify pending doctor applications (admin only).</p>
+    </div>
     <div class="card prog-card" onclick="showPage('scan')">
       <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/></svg></div>
       <h3>AI Health Scanner</h3>
@@ -973,40 +983,7 @@
         <div class="who" id="medAcctName">—</div>
         <div class="where" id="medAcctRole">—</div>
       </div>
-      <button id="medRoleSwitchBtn" onclick="toggleDoctorRegisterPanel()">Register as a doctor</button>
-    </div>
-
-    <!-- Doctor registration panel -->
-    <div class="card" id="medDoctorRegisterPanel" style="display:none;">
-      <h3 style="margin-top:0;font-size:16px;">Doctor account details</h3>
-      <p style="font-size:13px;color:rgba(18,32,26,.6);margin-top:-6px;">Fill this in once to open your doctor dashboard. You can edit it anytime from there.</p>
-      <div class="form-grid">
-        <div class="field">
-          <label>Specialty</label>
-          <input type="text" id="docSpecialty" placeholder="e.g. Poultry &amp; cattle vet">
-        </div>
-        <div class="field">
-          <label>Consultation fee</label>
-          <select id="docFeeType" onchange="document.getElementById('docFeeAmountWrap').style.display = this.value==='paid' ? 'block' : 'none';">
-            <option value="free">Free</option>
-            <option value="paid">Paid</option>
-          </select>
-        </div>
-        <div class="field" id="docFeeAmountWrap" style="display:none;">
-          <label>Fee amount (৳ per consultation)</label>
-          <input type="number" id="docFeeAmount" placeholder="e.g. 300">
-        </div>
-        <div class="field">
-          <label>Years of experience</label>
-          <input type="number" id="docYearsExp" placeholder="e.g. 5">
-        </div>
-      </div>
-      <div class="field">
-        <label>Short bio</label>
-        <input type="text" id="docBio" placeholder="Years of experience, animals you treat, clinic location, etc.">
-      </div>
-      <button class="primary-btn" onclick="submitDoctorRegistration()">Open doctor dashboard</button>
-      <div class="auth-error" id="docRegError"></div>
+      <button id="medRoleSwitchBtn" onclick="showPage('become-doctor')">Become a doctor</button>
     </div>
 
     <!-- ===== FARMER VIEW ===== -->
@@ -1363,7 +1340,111 @@
   </div>
 </section>
 
+<!-- ================= BECOME A DOCTOR (verified application) ================= -->
+<section class="page" id="page-become-doctor">
+  <div class="section-title" style="margin-top:0;">
+    <h2>Become a Doctor</h2>
+    <span class="tag">Verified vets only — reviewed by hand before you go live</span>
+  </div>
+
+  <div id="bdLoginPrompt">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">Log in first</h3>
+      <button class="primary-btn" onclick="showPage('profile')">Go to Profile to log in</button>
+    </div>
+  </div>
+
+  <div id="bdAlreadyDoctor" style="display:none;">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">You're already a verified doctor</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.6);">Manage your doctor profile from the Medical page.</p>
+      <button class="primary-btn" onclick="showPage('medical')">Go to Medical</button>
+    </div>
+  </div>
+
+  <div id="bdStatusView" style="display:none;">
+    <div class="card auth-card" style="text-align:center;">
+      <div class="icon-wrap" id="bdStatusIconWrap" style="margin:0 auto 14px;width:52px;height:52px;"></div>
+      <h3 style="margin-top:0;font-size:16px;" id="bdStatusTitle">Application under review</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.6);line-height:1.6;" id="bdStatusBody">We're reviewing your certificates. This usually takes a few days.</p>
+      <div id="bdRejectNoteWrap" style="display:none;margin-top:10px;padding:12px;border-radius:12px;background:rgba(228,87,46,0.1);font-size:12.5px;color:var(--barn);text-align:left;"></div>
+      <button class="ghost-btn" id="bdReapplyBtn" style="display:none;margin-top:14px;" onclick="resetDoctorApplicationForm()">Apply again</button>
+    </div>
+  </div>
+
+  <div id="bdFormView" style="display:none;">
+    <div class="card">
+      <h3 style="margin-top:0;font-size:16px;">Your details</h3>
+      <div class="form-grid">
+        <div class="field"><label>Full name</label><input type="text" id="bdName"></div>
+        <div class="field"><label>Age</label><input type="number" id="bdAge" placeholder="e.g. 34"></div>
+        <div class="field"><label>Date of birth</label><input type="date" id="bdBirthday"></div>
+        <div class="field"><label>Specialty</label><input type="text" id="bdSpecialty" placeholder="e.g. Poultry &amp; cattle vet"></div>
+        <div class="field">
+          <label>Consultation fee</label>
+          <select id="bdFeeType" onchange="document.getElementById('bdFeeAmountWrap').style.display = this.value==='paid' ? 'block' : 'none';">
+            <option value="free">Free</option>
+            <option value="paid">Paid</option>
+          </select>
+        </div>
+        <div class="field" id="bdFeeAmountWrap" style="display:none;"><label>Fee amount (৳ per consultation)</label><input type="number" id="bdFeeAmount"></div>
+        <div class="field"><label>Years of experience</label><input type="number" id="bdYearsExp"></div>
+        <div class="field"><label>University</label><input type="text" id="bdUniversity" placeholder="e.g. Bangladesh Agricultural University"></div>
+      </div>
+      <div class="field"><label>Short bio</label><input type="text" id="bdBio" placeholder="Animals you treat, clinic location, etc."></div>
+
+      <h3 style="font-size:15px;margin:24px 0 4px;">Photos &amp; certificates</h3>
+      <p style="font-size:12px;color:rgba(18,32,26,.55);margin:0 0 14px;">Clear photos of the real documents. These are compressed for review — they're not published publicly.</p>
+
+      <div class="bd-upload-row" data-type="profile">
+        <label>Your photo</label>
+        <input type="file" accept="image/*" onchange="handleBdFile(this,'profile')">
+        <img class="bd-thumb" id="bdThumb-profile" style="display:none;">
+      </div>
+      <div class="bd-upload-row" data-type="doctorCertificate">
+        <label>Doctor / veterinary certificate</label>
+        <input type="file" accept="image/*" onchange="handleBdFile(this,'doctorCertificate')">
+        <img class="bd-thumb" id="bdThumb-doctorCertificate" style="display:none;">
+      </div>
+      <div class="bd-upload-row" data-type="eduQualification">
+        <label>Educational qualification certificate</label>
+        <input type="file" accept="image/*" onchange="handleBdFile(this,'eduQualification')">
+        <img class="bd-thumb" id="bdThumb-eduQualification" style="display:none;">
+      </div>
+      <div class="bd-upload-row" data-type="universityCertificate">
+        <label>University certificate / degree</label>
+        <input type="file" accept="image/*" onchange="handleBdFile(this,'universityCertificate')">
+        <img class="bd-thumb" id="bdThumb-universityCertificate" style="display:none;">
+      </div>
+      <div class="bd-upload-row" data-type="hsc">
+        <label>HSC certificate</label>
+        <input type="file" accept="image/*" onchange="handleBdFile(this,'hsc')">
+        <img class="bd-thumb" id="bdThumb-hsc" style="display:none;">
+      </div>
+
+      <button class="primary-btn" style="margin-top:20px;" onclick="submitDoctorApplication()">Submit for review</button>
+      <div class="auth-error" id="bdError"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ADMIN: DOCTOR APPLICATIONS ================= -->
+<section class="page" id="page-admin-doctors">
+  <div class="section-title" style="margin-top:0;">
+    <h2>Doctor Applications</h2>
+    <span class="tag">Admin only</span>
+  </div>
+  <div id="adminNotAuthorized" style="display:none;">
+    <div class="card auth-card" style="text-align:center;">
+      <h3 style="margin-top:0;font-size:16px;">Not authorized</h3>
+      <p style="font-size:13px;color:rgba(18,32,26,.6);">This page is for AgriPulse admins only.</p>
+    </div>
+  </div>
+  <div id="adminAppsWrap"><div class="empty-state">Loading…</div></div>
+</section>
+
 <footer>AgriPulse — built for the people who feed everyone else.<br><span style="font-size:11px;opacity:.75;">This site is under construction — built by Aimon.</span></footer>
+
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
