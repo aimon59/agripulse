@@ -40,6 +40,12 @@ function showPage(name){
     renderHomeTasks();
     renderHomeAppointments();
   }
+  if(name==='become-doctor'){
+    initBecomeDoctorPage();
+  }
+  if(name==='admin-doctors'){
+    initAdminDoctorsPage();
+  }
 }
 document.querySelectorAll('.nav-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>showPage(btn.dataset.page));
@@ -1432,6 +1438,9 @@ function renderAccountState(){
     if(hasProfile) initMedicalPage();
   }
 
+  const adminTile = document.getElementById('adminTile');
+  if(adminTile) adminTile.style.display = (hasProfile && currentProfile.isAdmin) ? 'block' : 'none';
+
   if(typeof renderHomeTasks === 'function'){ renderHomeTasks(); renderHomeAppointments(); }
 }
 
@@ -2203,39 +2212,7 @@ function showMedDoctorView(view){
   document.getElementById('medview-'+view).classList.add('active');
 }
 
-/* ---- doctor registration ---- */
-function toggleDoctorRegisterPanel(){
-  const panel = document.getElementById('medDoctorRegisterPanel');
-  panel.style.display = panel.style.display==='none' ? 'block' : 'none';
-}
-
-function submitDoctorRegistration(){
-  const errEl = document.getElementById('docRegError');
-  errEl.style.display='none';
-  const specialty = document.getElementById('docSpecialty').value.trim();
-  const feeType = document.getElementById('docFeeType').value;
-  const fee = feeType==='paid' ? (parseFloat(document.getElementById('docFeeAmount').value)||0) : 0;
-  const bio = document.getElementById('docBio').value.trim();
-  const yearsExperience = parseFloat(document.getElementById('docYearsExp').value) || 0;
-  if(!specialty){
-    errEl.textContent = 'Please enter your specialty.';
-    errEl.style.display='block';
-    return;
-  }
-  const doctorProfile = {specialty, feeType, fee, bio, yearsExperience, status:'offline'};
-  db.collection('users').doc(currentUser.uid).set({
-    isDoctor:true, doctorProfile, doctorRegisteredAt: firebase.firestore.FieldValue.serverTimestamp()
-  }, {merge:true}).then(()=>{
-    currentProfile.doctorProfile = doctorProfile;
-    currentProfile.isDoctor = true;
-    document.getElementById('medDoctorRegisterPanel').style.display='none';
-    medListenersAttached = false;
-    initMedicalPage();
-  }).catch(err=>{
-    errEl.textContent = err.message;
-    errEl.style.display='block';
-  });
-}
+/* ---- doctor registration is now handled by the verified "Become a Doctor" application flow ---- */
 
 function setDoctorStatusButtons(status){
   document.getElementById('docStatusOnlineBtn').classList.toggle('on', status==='online');
@@ -2397,7 +2374,7 @@ async function openDoctorDetail(uid){
   document.getElementById('doctorDetailOverlay').style.display='block';
   window.scrollTo({top:0});
   document.getElementById('ddAvatar').textContent = (doc.name||'?').charAt(0).toUpperCase();
-  document.getElementById('ddName').textContent = doc.name || 'Doctor';
+  document.getElementById('ddName').innerHTML = `${escapeHtml(doc.name || 'Doctor')} <span class="verified-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Verified</span>`;
   document.getElementById('ddSpecialty').textContent = dp.specialty || 'General veterinarian';
   document.getElementById('ddFee').textContent = dp.feeType==='paid' ? `৳${dp.fee||0} / session` : 'Free consultation';
   document.getElementById('ddExp').textContent = dp.yearsExperience ? `${dp.yearsExperience} yrs` : '—';
@@ -2474,6 +2451,256 @@ function bookFromDoctorDetail(){
 function previewMyDoctorProfile(){
   if(!currentUser) return;
   openDoctorDetail(currentUser.uid);
+}
+
+/* ================= DOCTOR VERIFICATION SYSTEM ================= */
+
+/* compress an image file client-side into a small JPEG data URL, so certificate
+   photos can live directly in Firestore without needing paid file storage */
+function compressImageToDataURL(file, maxDim, quality){
+  maxDim = maxDim || 800; quality = quality || 0.5;
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > h && w > maxDim){ h = Math.round(h*maxDim/w); w = maxDim; }
+        else if(h > maxDim){ w = Math.round(w*maxDim/h); h = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+let bdPhotos = {}; // type -> dataURL, held in memory until submit
+
+function handleBdFile(inputEl, type){
+  const file = inputEl.files[0];
+  if(!file) return;
+  compressImageToDataURL(file, 900, 0.55).then(dataUrl=>{
+    bdPhotos[type] = dataUrl;
+    const thumb = document.getElementById('bdThumb-'+type);
+    thumb.src = dataUrl;
+    thumb.style.display = 'inline-block';
+    if(dataUrl.length > 900000){
+      alert('That photo is still fairly large after compression — it may be slow to upload. Consider a simpler/clearer photo if this fails.');
+    }
+  }).catch(()=>{
+    alert('Could not read that photo. Please try a different file.');
+  });
+}
+
+async function initBecomeDoctorPage(){
+  document.getElementById('bdLoginPrompt').style.display = 'none';
+  document.getElementById('bdAlreadyDoctor').style.display = 'none';
+  document.getElementById('bdStatusView').style.display = 'none';
+  document.getElementById('bdFormView').style.display = 'none';
+
+  if(!currentUser || !currentProfile){
+    document.getElementById('bdLoginPrompt').style.display = 'block';
+    return;
+  }
+  if(currentProfile.isDoctor){
+    document.getElementById('bdAlreadyDoctor').style.display = 'block';
+    return;
+  }
+
+  let appDoc;
+  try{
+    const snap = await db.collection('doctorApplications').doc(currentUser.uid).get();
+    appDoc = snap.exists ? snap.data() : null;
+  } catch(err){
+    console.warn('Could not check application status:', err);
+    appDoc = null;
+  }
+
+  if(appDoc && (appDoc.status==='pending' || appDoc.status==='rejected')){
+    const iconWrap = document.getElementById('bdStatusIconWrap');
+    const title = document.getElementById('bdStatusTitle');
+    const body = document.getElementById('bdStatusBody');
+    const noteWrap = document.getElementById('bdRejectNoteWrap');
+    const reapplyBtn = document.getElementById('bdReapplyBtn');
+    if(appDoc.status==='pending'){
+      iconWrap.style.background='rgba(242,169,59,0.18)';
+      iconWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#8a5a12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>';
+      title.textContent = 'Application under review';
+      body.textContent = "We're reviewing your certificates. This usually takes a few days — you'll gain access to Medical's doctor tools as soon as you're approved.";
+      noteWrap.style.display='none';
+      reapplyBtn.style.display='none';
+    } else {
+      iconWrap.style.background='rgba(228,87,46,0.16)';
+      iconWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--barn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>';
+      title.textContent = 'Application not approved';
+      body.textContent = "Your last application wasn't approved. You're welcome to review the note below and apply again.";
+      noteWrap.style.display = appDoc.reviewNote ? 'block' : 'none';
+      noteWrap.textContent = appDoc.reviewNote ? ('Reviewer note: ' + appDoc.reviewNote) : '';
+      reapplyBtn.style.display='block';
+    }
+    document.getElementById('bdStatusView').style.display = 'block';
+    return;
+  }
+
+  showBdForm();
+}
+
+function showBdForm(){
+  bdPhotos = {};
+  document.querySelectorAll('.bd-thumb').forEach(t=>{ t.style.display='none'; t.src=''; });
+  document.getElementById('bdName').value = currentProfile.name || '';
+  document.getElementById('bdError').style.display='none';
+  document.getElementById('bdStatusView').style.display = 'none';
+  document.getElementById('bdFormView').style.display = 'block';
+}
+
+function resetDoctorApplicationForm(){
+  showBdForm();
+}
+
+async function submitDoctorApplication(){
+  const errEl = document.getElementById('bdError');
+  errEl.style.display='none';
+  const name = document.getElementById('bdName').value.trim();
+  const age = parseFloat(document.getElementById('bdAge').value) || null;
+  const birthday = document.getElementById('bdBirthday').value;
+  const specialty = document.getElementById('bdSpecialty').value.trim();
+  const feeType = document.getElementById('bdFeeType').value;
+  const fee = feeType==='paid' ? (parseFloat(document.getElementById('bdFeeAmount').value)||0) : 0;
+  const yearsExperience = parseFloat(document.getElementById('bdYearsExp').value) || 0;
+  const university = document.getElementById('bdUniversity').value.trim();
+  const bio = document.getElementById('bdBio').value.trim();
+
+  if(!name || !age || !birthday || !specialty){
+    errEl.textContent = 'Please fill in your name, age, birthday and specialty.';
+    errEl.style.display='block';
+    return;
+  }
+  const requiredPhotos = ['profile','doctorCertificate','eduQualification','universityCertificate','hsc'];
+  const missing = requiredPhotos.filter(t=>!bdPhotos[t]);
+  if(missing.length){
+    errEl.textContent = 'Please upload all 5 photos before submitting.';
+    errEl.style.display='block';
+    return;
+  }
+
+  const application = {
+    applicantUid: currentUser.uid, name, age, birthday, specialty, feeType, fee,
+    yearsExperience, university, bio, status:'pending',
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp(), reviewedAt: null, reviewNote: null
+  };
+
+  try{
+    const appRef = db.collection('doctorApplications').doc(currentUser.uid);
+    await appRef.set(application);
+    const photoWrites = requiredPhotos.map(type=>
+      appRef.collection('photos').doc(type).set({type, dataUrl: bdPhotos[type], uploadedAt: firebase.firestore.FieldValue.serverTimestamp()})
+    );
+    await Promise.all(photoWrites);
+    initBecomeDoctorPage();
+  } catch(err){
+    errEl.textContent = 'Could not submit: ' + err.message;
+    errEl.style.display='block';
+  }
+}
+
+/* ---- admin review dashboard ---- */
+let unsubAdminApps = null;
+
+function initAdminDoctorsPage(){
+  const wrap = document.getElementById('adminAppsWrap');
+  const notAuth = document.getElementById('adminNotAuthorized');
+  if(!currentProfile || !currentProfile.isAdmin){
+    notAuth.style.display='block';
+    wrap.innerHTML='';
+    return;
+  }
+  notAuth.style.display='none';
+  wrap.innerHTML = '<div class="empty-state">Loading applications…</div>';
+
+  if(unsubAdminApps) unsubAdminApps();
+  unsubAdminApps = db.collection('doctorApplications').where('status','==','pending')
+    .onSnapshot(snap=>{
+      const apps = snap.docs.map(d=>d.data());
+      renderAdminApps(apps);
+    }, err=>{
+      console.warn('Admin applications listener failed:', err);
+      wrap.innerHTML = `<div class="empty-state">Could not load applications: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+async function renderAdminApps(apps){
+  const wrap = document.getElementById('adminAppsWrap');
+  if(!apps.length){
+    wrap.innerHTML = '<div class="empty-state">No pending applications right now.</div>';
+    return;
+  }
+  const cardsHtml = await Promise.all(apps.map(async a=>{
+    let photosHtml = '';
+    try{
+      const photoSnap = await db.collection('doctorApplications').doc(a.applicantUid).collection('photos').get();
+      const labels = {profile:'Photo', doctorCertificate:'Doctor certificate', eduQualification:'Educational qualification', universityCertificate:'University certificate', hsc:'HSC certificate'};
+      photosHtml = photoSnap.docs.map(d=>{
+        const p = d.data();
+        return `<div style="text-align:center;"><img src="${p.dataUrl}" style="width:100%;max-width:140px;border-radius:12px;border:1px solid rgba(18,32,26,0.1);"><div style="font-size:10.5px;color:rgba(18,32,26,.5);margin-top:4px;">${escapeHtml(labels[p.type]||p.type)}</div></div>`;
+      }).join('');
+    }catch(e){ photosHtml = '<div class="empty-state">Could not load photos.</div>'; }
+
+    return `<div class="card" style="margin-bottom:18px;padding:22px;">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div>
+          <h3 style="margin:0 0 3px;font-size:16px;color:var(--canopy);">${escapeHtml(a.name)}</h3>
+          <div style="font-size:12.5px;color:rgba(18,32,26,.6);">${escapeHtml(a.specialty)} · Age ${a.age} · DOB ${escapeHtml(a.birthday)} · ${a.yearsExperience||0} yrs exp</div>
+          <div style="font-size:12.5px;color:rgba(18,32,26,.6);">${escapeHtml(a.university||'—')} · ${a.feeType==='paid' ? ('৳'+a.fee+'/session') : 'Free'}</div>
+        </div>
+      </div>
+      ${a.bio ? `<p style="font-size:13px;color:rgba(18,32,26,.7);margin:10px 0;">${escapeHtml(a.bio)}</p>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px;margin:14px 0;">${photosHtml}</div>
+      <div style="display:flex;gap:10px;">
+        <button class="solid-btn" style="flex:1;" onclick='approveDoctorApplication(${JSON.stringify(a.applicantUid)})'>Approve</button>
+        <button class="ghost-btn" style="flex:1;color:var(--barn);" onclick='rejectDoctorApplication(${JSON.stringify(a.applicantUid)})'>Reject</button>
+      </div>
+    </div>`;
+  }));
+  wrap.innerHTML = cardsHtml.join('');
+}
+
+async function approveDoctorApplication(uid){
+  const ok = await showConfirm('Approve this doctor?', "They'll immediately gain access to the doctor tools in Medical and appear in doctor search.");
+  if(!ok) return;
+  try{
+    const appRef = db.collection('doctorApplications').doc(uid);
+    const appSnap = await appRef.get();
+    const a = appSnap.data();
+    const doctorProfile = {
+      specialty: a.specialty, feeType: a.feeType, fee: a.fee,
+      bio: a.bio, yearsExperience: a.yearsExperience, university: a.university,
+      status: 'offline'
+    };
+    await db.collection('users').doc(uid).set({isDoctor:true, doctorProfile}, {merge:true});
+    await appRef.update({status:'approved', reviewedAt: firebase.firestore.FieldValue.serverTimestamp()});
+  } catch(err){
+    alert('Could not approve: ' + err.message);
+  }
+}
+
+async function rejectDoctorApplication(uid){
+  const reason = prompt('Optional: add a short note for the applicant on why this was rejected.') || '';
+  const ok = await showConfirm('Reject this application?', 'The applicant will be able to see your note and apply again.');
+  if(!ok) return;
+  try{
+    await db.collection('doctorApplications').doc(uid).update({
+      status:'rejected', reviewNote: reason, reviewedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch(err){
+    alert('Could not reject: ' + err.message);
+  }
 }
 
 
@@ -2745,7 +2972,6 @@ function openMedRoom(apptId){
   document.getElementById('medRoom').style.display='block';
   document.getElementById('medFarmerView').style.display = 'none';
   document.getElementById('medDoctorView').style.display = 'none';
-  document.getElementById('medDoctorRegisterPanel').style.display='none';
   document.getElementById('prescriptionForm').style.display='none';
   window.scrollTo({top:0, behavior:'smooth'});
 
